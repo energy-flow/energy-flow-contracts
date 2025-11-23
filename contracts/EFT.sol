@@ -45,7 +45,7 @@ contract EFT is ERC20, AccessControl {
      * @param account Compte dont on détruit les tokens
      * @param amount Quantité de tokens à détruire
      */
-    function burnFrom(address account, uint256 amount) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function burnFrom(address account, uint256 amount) external onlyRole(MINTER_ROLE) {
         require(amount > 0, "EFT: burn amount must be positive");
 
         // Should I check for allowance
