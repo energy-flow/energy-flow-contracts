@@ -38,11 +38,11 @@ describe("Deployment", function () {
 });
 
 describe("Minting", async function () {
-  let token;
-  let admin;
-  let minter;
-  let user1;
-  let user2;
+  let token: any;
+  let admin: any;
+  let minter: any;
+  let user1: any;
+  let user2: any;
   beforeEach(async function () {
     ({token, admin, minter, user1, user2} = await setUpSmartContract())
   });
@@ -109,11 +109,11 @@ describe("Minting", async function () {
 });
 
 describe("BurnFrom", function () {
-  let token;
-  let admin;
-  let minter;
-  let user1;
-  let user2;
+  let token: any;
+  let admin: any;
+  let minter: any;
+  let user1: any;
+  let user2: any;
   beforeEach(async function () {
     ({token, admin, minter, user1, user2} = await setUpSmartContract())
     const amount = ethers.parseEther("1000");
@@ -122,18 +122,18 @@ describe("BurnFrom", function () {
 
   it("Should emit EnergyBurned event when burning", async function () {
     const burnAmount = ethers.parseEther("200");
-    await expect(token.connect(admin).burnFrom(user1.address, burnAmount))
+    await expect(token.connect(minter).burnFrom(user1.address, burnAmount))
         .to.emit(token, "EnergyBurned")
         .withArgs(user1.address, burnAmount);
   });
 });
 
 describe("Transfers", function () {
-  let token;
-  let admin;
-  let minter;
-  let user1;
-  let user2;
+  let token: any;
+  let admin: any;
+  let minter: any;
+  let user1: any;
+  let user2: any;
   beforeEach(async function () {
     ({token, admin, minter, user1, user2} = await setUpSmartContract())
     const amount = ethers.parseEther("1000");
@@ -173,11 +173,11 @@ describe("Transfers", function () {
 });
 
 describe("Role Management", function () {
-  let token;
-  let admin;
-  let minter;
-  let user1;
-  let user2;
+  let token: any;
+  let admin: any;
+  let minter: any;
+  let user1: any;
+  let user2: any;
   beforeEach(async function () {
     ({token, admin, minter, user1, user2} = await setUpSmartContract())
   });
@@ -217,11 +217,11 @@ describe("Role Management", function () {
 });
 
 describe("Event Tracking", function () {
-  let token;
-  let admin;
-  let minter;
-  let user1;
-  let user2;
+  let token: any;
+  let admin: any;
+  let minter: any;
+  let user1: any;
+  let user2: any;
   beforeEach(async function () {
     ({token, admin, minter, user1, user2} = await setUpSmartContract())
   });
@@ -254,9 +254,9 @@ describe("Event Tracking", function () {
 
     await token.connect(minter).mint(user1.address, ethers.parseEther("1000"), "METER_001");
 
-    await token.connect(admin).burnFrom(user1.address, ethers.parseEther("100"));
-    await token.connect(admin).burnFrom(user1.address, ethers.parseEther("50"));
-    await token.connect(admin).burnFrom(user1.address, ethers.parseEther("75"));
+    await token.connect(minter).burnFrom(user1.address, ethers.parseEther("100"));
+    await token.connect(minter).burnFrom(user1.address, ethers.parseEther("50"));
+    await token.connect(minter).burnFrom(user1.address, ethers.parseEther("75"));
 
     const events = await token.queryFilter(
         token.filters.EnergyBurned(),
