@@ -1,19 +1,27 @@
-// SPDX-License-Identifier: UNLICENSED
+// SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 
 /**
- * @title PricingDAO - Gouvernance décentralisée pour le prix local de l'énergie
- * @notice Permet aux membres de voter sur le prix du kWh selon un modèle bi-collège
- * @dev Implémente un système de vote où producteurs et consommateurs ont chacun 50% du poids
+ * @title PricingDAO - Decentralized governance for local energy pricing
+ * @notice Allows members to vote on kWh price using a bi-college model
+ * @dev Implements a voting system where producers and consumers each have 50% weight
  */
-// TODO: partie calcul votes
-// TODO: voir aussi la logic pour la période du vote
 contract PricingDAO is AccessControl {
-    bytes32 public constant ADMIN_ROLE = DEFAULT_ADMIN_ROLE; // Address PMO
-    bytes32 public constant PRODUCER_ROLE = keccak256("PRODUCER_ROLE");
-    bytes32 public constant CONSUMER_ROLE = keccak256("CONSUMER_ROLE");
+    /// @notice Admin role (PMO address)
+    bytes32 public constant ADMIN_ROLE = DEFAULT_ADMIN_ROLE;
+    /// @notice Member role for voting rights
+    bytes32 public constant MEMBER_ROLE = keccak256("MEMBER_ROLE");
+
+    enum WorkflowStatus {
+        RegisteringVoters,
+        ProposalRegistrationStarted,
+        ProposalRegistrationEnded,
+        VotingSessionStarted,
+        VotingSessionEnded,
+        VotesTallied
+    }
 
     enum VoteChoice {
         None,
@@ -22,179 +30,328 @@ contract PricingDAO is AccessControl {
         Abstain
     }
 
+    /// @notice Structure representing a price proposal
+    /// @param pricePerKWh Proposed price in wei
+    /// @param applied Whether the proposal result has been applied
     struct PriceProposal {
-        uint pricePerKWh; // Prix en wei (ex: 0.15 EUR = 150000000000000000 wei)
-        uint proposalId;
+        uint pricePerKWh;
         bool applied;
-        uint snapshotProducersCount;
-        uint snapshotConsumersCount;
+        uint snapshotProducersCount; // for off-chain tracking
+        uint snapshotConsumersCount; // for off-chain tracking
         uint producersVotedFor;
         uint producersVotedAgainst;
         uint consumersVotedFor;
         uint consumersVotedAgainst;
     }
 
-    uint public currentPrice; // (en wei)
+    uint public currentPrice; // in wei
     uint public proposalCounter;
     uint public activeProposalId;
     bool public hasActiveProposal;
     uint public producersCount;
     uint public consumersCount;
+    WorkflowStatus public workflowStatus;
 
     mapping(uint => PriceProposal) public proposals;
     mapping(address => bool) public isProducer;
     mapping(address => bool) public isConsumer;
     mapping(uint => mapping(address => VoteChoice)) public votes;
 
+    // ============ Events ============
+
     event MemberAdded(address indexed member, bool isProducer);
     event MemberRemoved(address indexed member, bool wasProducer);
     event ProposalCreated(uint indexed proposalId, uint pricePerKWh);
     event VoteCast(uint indexed proposalId, address indexed voter, bool isProducer, VoteChoice choice);
-    event ProposalExecuted(uint indexed proposalId, uint newPrice);
-    event PriceAutoRenewed(uint price);
+    event WorkflowStatusChange(WorkflowStatus previousStatus, WorkflowStatus newStatus);
+    event PriceChanged(uint indexed proposalId, uint oldPrice, uint newPrice);
+
+    error InvalidAddress();
+    error InvalidPrice();
+    error MemberAlreadyExists();
+    error MemberNotFound();
+    error VotingInProgress();
+    error InvalidWorkflowStatus();
+    error ProposalAlreadyExists();
+    error InsufficientMembers();
+    error NoActiveProposal();
+    error InvalidVoteChoice();
+    error AlreadyVoted();
+    error ProposalAlreadyApplied();
 
     /**
-     * @notice Initialise le contrat avec un administrateur
-     * @param initialAdmin Adresse de l'administrateur initial
-     * @param initialPrice Prix initial en wei
+     * @notice Initializes the contract with an administrator and initial price
+     * @param _initialAdmin Address of the initial administrator (PMO)
+     * @param _initialPrice Initial price in wei
      */
-    constructor(address initialAdmin, uint initialPrice) {
-        require(initialAdmin != address(0), "PricingDAO: admin is zero address");
-        require(initialPrice > 0, "PricingDAO: initial price must be positive");
+    constructor(address _initialAdmin, uint _initialPrice) {
+        require(_initialAdmin != address(0), InvalidAddress());
+        require(_initialPrice != 0, InvalidPrice());
 
-        _grantRole(ADMIN_ROLE, initialAdmin);
-        currentPrice = initialPrice;
+        _grantRole(ADMIN_ROLE, _initialAdmin);
+        currentPrice = _initialPrice;
     }
 
+    // ============ Member Management ============
+
     /**
-     * @notice Ajoute un membre à la DAO
-     * @param member Adresse du membre
-     * @param _isProducer true si producteur, false si consommateur
+     * @notice Adds a member to the DAO
+     * @param _member Address of the member
+     * @param _isProducer True if producer, false if consumer
      */
-    function addMember(address member, bool _isProducer) external onlyRole(ADMIN_ROLE) {
-        require(member != address(0), "PricingDAO: member is zero address");
-        require(!isProducer[member] && !isConsumer[member], "PricingDAO: member already exists");
+    function addMember(address _member, bool _isProducer) external onlyRole(ADMIN_ROLE) {
+        require(workflowStatus != WorkflowStatus.VotingSessionStarted, VotingInProgress());
+        require(_member != address(0), InvalidAddress());
+        require(!isProducer[_member] && !isConsumer[_member], MemberAlreadyExists());
+
+        _grantRole(MEMBER_ROLE, _member);
 
         if (_isProducer) {
-            _grantRole(PRODUCER_ROLE, member);
-            isProducer[member] = true;
+            isProducer[_member] = true;
             producersCount++;
         } else {
-            _grantRole(CONSUMER_ROLE, member);
-            isConsumer[member] = true;
+            isConsumer[_member] = true;
             consumersCount++;
         }
 
-        emit MemberAdded(member, _isProducer);
+        emit MemberAdded(_member, _isProducer);
     }
 
     /**
-     * @notice Retire un membre de la DAO
-     * @param member Adresse du membre à retirer
+     * @notice Removes a member from the DAO
+     * @param _member Address of the member to remove
      */
-    function removeMember(address member) external onlyRole(ADMIN_ROLE) {
-        require(isProducer[member] || isConsumer[member], "PricingDAO: member does not exist");
+    function removeMember(address _member) external onlyRole(ADMIN_ROLE) {
+        require(workflowStatus != WorkflowStatus.VotingSessionStarted, VotingInProgress());
+        require(isProducer[_member] || isConsumer[_member], MemberNotFound());
 
-        bool wasProducer = isProducer[member];
+        bool _wasProducer = isProducer[_member];
 
-        if (isProducer[member]) {
-            _revokeRole(PRODUCER_ROLE, member);
-            isProducer[member] = false;
+        _revokeRole(MEMBER_ROLE, _member);
+
+        if (_wasProducer) {
+            isProducer[_member] = false;
             producersCount--;
         } else {
-            _revokeRole(CONSUMER_ROLE, member);
-            isConsumer[member] = false;
+            isConsumer[_member] = false;
             consumersCount--;
         }
 
-        emit MemberRemoved(member, wasProducer);
+        emit MemberRemoved(_member, _wasProducer);
     }
 
+    // ============ Proposal Management ============
+
     /**
-     * @notice Crée une nouvelle proposition de prix
-     * @param pricePerKWh Prix proposé en wei
-     * @param votingPeriod Durée du vote en secondes
+     * @notice Creates a new price proposal
+     * @param _pricePerKWh Proposed price in wei
      */
-    function createProposal(uint pricePerKWh, uint votingPeriod) external onlyRole(ADMIN_ROLE) {
-        require(pricePerKWh > 0, "PricingDAO: price must be positive");
-        require(votingPeriod > 0, "PricingDAO: voting period must be positive");
-        require(!hasActiveProposal, "PricingDAO: active proposal already exists");
-        require(producersCount > 0 && consumersCount > 0, "PricingDAO: need both producers and consumers");
+    function createProposal(uint _pricePerKWh) external onlyRole(ADMIN_ROLE) {
+        require(workflowStatus == WorkflowStatus.ProposalRegistrationStarted, InvalidWorkflowStatus());
+        require(_pricePerKWh != 0, InvalidPrice());
+        require(!hasActiveProposal, ProposalAlreadyExists());
+        require(producersCount != 0 && consumersCount != 0, InsufficientMembers());
 
         proposalCounter++;
         activeProposalId = proposalCounter;
         hasActiveProposal = true;
 
-        PriceProposal storage proposal = proposals[proposalCounter];
-        proposal.pricePerKWh = pricePerKWh;
-        proposal.proposalId = proposalCounter;
-        proposal.snapshotProducersCount = producersCount;
-        proposal.snapshotConsumersCount = consumersCount;
+        PriceProposal storage _proposal = proposals[proposalCounter];
+        _proposal.pricePerKWh = _pricePerKWh;
+        _proposal.snapshotProducersCount = producersCount;
+        _proposal.snapshotConsumersCount = consumersCount;
 
-        emit ProposalCreated(proposalCounter, pricePerKWh);
+        emit ProposalCreated(proposalCounter, _pricePerKWh);
     }
 
+    // ============ Voting ============
+
     /**
-     * @notice Vote sur la proposition active
-     * @param choice Choix de vote (For, Against, ou Abstain)
+     * @notice Casts a vote on the active proposal
+     * @param _choice Vote choice (For, Against, or Abstain)
      */
-    function vote(VoteChoice choice) external {
-        require(hasActiveProposal, "PricingDAO: no active proposal");
-        require(isProducer[msg.sender] || isConsumer[msg.sender], "PricingDAO: not a member");
-        require(choice != VoteChoice.None, "PricingDAO: invalid vote choice");
+    function vote(VoteChoice _choice) external onlyRole(MEMBER_ROLE) {
+        require(workflowStatus == WorkflowStatus.VotingSessionStarted, InvalidWorkflowStatus());
+        require(hasActiveProposal, NoActiveProposal());
+        require(_choice != VoteChoice.None, InvalidVoteChoice());
+        require(votes[activeProposalId][msg.sender] == VoteChoice.None, AlreadyVoted());
 
-        PriceProposal storage proposal = proposals[activeProposalId];
+        votes[activeProposalId][msg.sender] = _choice;
 
-        require(votes[activeProposalId][msg.sender] == VoteChoice.None, "PricingDAO: already voted");
+        bool _isProducer = isProducer[msg.sender];
 
-        votes[activeProposalId][msg.sender] = choice;
-
-        // Les abstentions sont enregistrées mais ne comptent ni pour ni contre
-        if (choice == VoteChoice.Abstain) {
-            emit VoteCast(activeProposalId, msg.sender, isProducer[msg.sender], choice);
+        // Abstentions
+        if (_choice == VoteChoice.Abstain) {
+            emit VoteCast(activeProposalId, msg.sender, _isProducer, _choice);
             return;
         }
 
-        // Cache isProducer check to save gas
-        bool _isProducer = isProducer[msg.sender];
-        bool _isVoteFor = choice == VoteChoice.For;
+        PriceProposal storage _proposal = proposals[activeProposalId];
+        bool _isVoteFor = _choice == VoteChoice.For;
 
         if (_isProducer && _isVoteFor) {
-            proposal.producersVotedFor++;
-            emit VoteCast(activeProposalId, msg.sender, true, choice);
+            _proposal.producersVotedFor++;
+            emit VoteCast(activeProposalId, msg.sender, true, _choice);
             return;
         }
 
         if (_isProducer) {
-            proposal.producersVotedAgainst++;
-            emit VoteCast(activeProposalId, msg.sender, true, choice);
+            _proposal.producersVotedAgainst++;
+            emit VoteCast(activeProposalId, msg.sender, true, _choice);
             return;
         }
 
         if (_isVoteFor) {
-            proposal.consumersVotedFor++;
-            emit VoteCast(activeProposalId, msg.sender, false, choice);
+            _proposal.consumersVotedFor++;
+            emit VoteCast(activeProposalId, msg.sender, false, _choice);
             return;
         }
 
-        proposal.consumersVotedAgainst++;
-        emit VoteCast(activeProposalId, msg.sender, false, choice);
+        _proposal.consumersVotedAgainst++;
+        emit VoteCast(activeProposalId, msg.sender, false, _choice);
+    }
+
+    // ============ Proposal Execution ============
+
+    /**
+     * @notice Executes the proposal after voting ends
+     * @dev Anyone can call this function after voting session ends
+     */
+    function executeProposal() external {
+        require(workflowStatus == WorkflowStatus.VotingSessionEnded, InvalidWorkflowStatus());
+        require(hasActiveProposal, NoActiveProposal());
+
+        PriceProposal storage _proposal = proposals[activeProposalId];
+        require(!_proposal.applied, ProposalAlreadyApplied());
+
+        _proposal.applied = true;
+        hasActiveProposal = false;
+
+        (uint _totalWeightFor, uint _totalWeightAgainst) = _calculateWeight(_proposal);
+
+        uint _oldPrice = currentPrice;
+
+        // Price is adopted if majority votes for (> 50%)
+        if (_totalWeightFor > _totalWeightAgainst) {
+            currentPrice = _proposal.pricePerKWh;
+            emit PriceChanged(activeProposalId, _oldPrice, currentPrice);
+        }
+
+        workflowStatus = WorkflowStatus.VotesTallied;
+        emit WorkflowStatusChange(WorkflowStatus.VotingSessionEnded, WorkflowStatus.VotesTallied);
+    }
+
+    // ============ Workflow Management ============
+
+    /**
+     * @notice Starts the proposal registration phase
+     */
+    function startProposalRegistration() external onlyRole(ADMIN_ROLE) {
+        require(workflowStatus == WorkflowStatus.RegisteringVoters, InvalidWorkflowStatus());
+
+        workflowStatus = WorkflowStatus.ProposalRegistrationStarted;
+        emit WorkflowStatusChange(WorkflowStatus.RegisteringVoters, WorkflowStatus.ProposalRegistrationStarted);
     }
 
     /**
-     * @notice Obtient le choix de vote d'un membre pour une proposition
-     * @param proposalId ID de la proposition
-     * @param voter Adresse du votant
+     * @notice Ends the proposal registration phase
      */
-    function getVote(uint proposalId, address voter) external view returns (VoteChoice) {
-        return votes[proposalId][voter];
+    function endProposalRegistration() external onlyRole(ADMIN_ROLE) {
+        require(workflowStatus == WorkflowStatus.ProposalRegistrationStarted, InvalidWorkflowStatus());
+
+        workflowStatus = WorkflowStatus.ProposalRegistrationEnded;
+        emit WorkflowStatusChange(WorkflowStatus.ProposalRegistrationStarted, WorkflowStatus.ProposalRegistrationEnded);
     }
 
     /**
-     * @notice Obtient les détails d'une proposition
-     * @param proposalId ID de la proposition
+     * @notice Starts the voting session
      */
-    function getProposal(uint proposalId) external view returns (PriceProposal memory) {
-        return proposals[proposalId];
+    function startVotingSession() external onlyRole(ADMIN_ROLE) {
+        require(workflowStatus == WorkflowStatus.ProposalRegistrationEnded, InvalidWorkflowStatus());
+        require(hasActiveProposal, NoActiveProposal());
+
+        workflowStatus = WorkflowStatus.VotingSessionStarted;
+        emit WorkflowStatusChange(WorkflowStatus.ProposalRegistrationEnded, WorkflowStatus.VotingSessionStarted);
+    }
+
+    /**
+     * @notice Ends the voting session
+     */
+    function endVotingSession() external onlyRole(ADMIN_ROLE) {
+        require(workflowStatus == WorkflowStatus.VotingSessionStarted, InvalidWorkflowStatus());
+
+        workflowStatus = WorkflowStatus.VotingSessionEnded;
+        emit WorkflowStatusChange(WorkflowStatus.VotingSessionStarted, WorkflowStatus.VotingSessionEnded);
+    }
+
+    /**
+     * @notice Resets the workflow for a new voting cycle
+     * @dev Can only be called after votes have been tallied
+     */
+    function resetWorkflow() external onlyRole(ADMIN_ROLE) {
+        require(workflowStatus == WorkflowStatus.VotesTallied, InvalidWorkflowStatus());
+
+        workflowStatus = WorkflowStatus.RegisteringVoters;
+        emit WorkflowStatusChange(WorkflowStatus.VotesTallied, WorkflowStatus.RegisteringVoters);
+    }
+
+    // ============ View Functions ============
+
+    /**
+     * @notice Gets the vote choice of a member for a proposal
+     * @param _proposalId ID of the proposal
+     * @param _voter Address of the voter
+     * @return Vote choice of the voter
+     */
+    function getVote(uint _proposalId, address _voter) external view returns (VoteChoice) {
+        return votes[_proposalId][_voter];
+    }
+
+    /**
+     * @notice Gets the details of a proposal
+     * @param _proposalId ID of the proposal
+     * @return Proposal struct
+     */
+    function getProposal(uint _proposalId) external view returns (PriceProposal memory) {
+        return proposals[_proposalId];
+    }
+
+    // ============ Internal Functions ============
+
+    /**
+     * @notice Calculates the bi-college weight of a proposal
+     * @dev Each college (producers/consumers) weighs 50% of the total vote
+     * @param _proposal The proposal to evaluate
+     * @return _weightFor Total weight for (out of 10000, i.e., 100.00%)
+     * @return _weightAgainst Total weight against (out of 10000, i.e., 100.00%)
+     */
+    function _calculateWeight(PriceProposal memory _proposal) private pure returns (
+        uint _weightFor,
+        uint _weightAgainst
+    ) {
+        // Calculate producer college weight (50% of total)
+        uint _producersTotalVotes = _proposal.producersVotedFor + _proposal.producersVotedAgainst;
+        uint _producersWeightFor;
+        uint _producersWeightAgainst;
+
+        if (_producersTotalVotes > 0) {
+            // Uses base of 10000 for precision (50% = 5000, represents 50.00%)
+            _producersWeightFor = (_proposal.producersVotedFor * 5000) / _producersTotalVotes;
+            _producersWeightAgainst = (_proposal.producersVotedAgainst * 5000) / _producersTotalVotes;
+        }
+
+        // Calculate consumer college weight (50% of total)
+        uint _consumersTotalVotes = _proposal.consumersVotedFor + _proposal.consumersVotedAgainst;
+        uint _consumersWeightFor;
+        uint _consumersWeightAgainst;
+
+        if (_consumersTotalVotes > 0) {
+            _consumersWeightFor = (_proposal.consumersVotedFor * 5000) / _consumersTotalVotes;
+            _consumersWeightAgainst = (_proposal.consumersVotedAgainst * 5000) / _consumersTotalVotes;
+        }
+
+        // Total out of 10000 (100.00%)
+        _weightFor = _producersWeightFor + _consumersWeightFor;
+        _weightAgainst = _producersWeightAgainst + _consumersWeightAgainst;
     }
 }
