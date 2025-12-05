@@ -25,13 +25,13 @@ contract MockAavePool is IPool {
      * @param _asset The underlying asset to supply
      * @param _amount The amount to supply
      * @param _onBehalfOf The address receiving aTokens
-     * @param _referralCode Referral code (unused in mock)
+     * _referralCode Referral code unused in mock)
      */
     function supply(
         address _asset,
         uint _amount,
         address _onBehalfOf,
-        uint16 _referralCode
+        uint16 /*_referralCode*/
     ) external {
         require(_asset == address(eurc), "MockAavePool: invalid asset");
 

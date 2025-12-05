@@ -2,7 +2,7 @@ import { buildModule } from "@nomicfoundation/hardhat-ignition/modules";
 import { parseUnits } from "ethers";
 
 export default buildModule("PricingDAOModule", (m) => {
-  // TODO: ajouter adresse
+  // TODO: ajouter adresse dynamiquement
   const pmoAdmin = m.getParameter("pmoAdmin", m.getAccount(0));
 
   // 0.15 EUR/kWh

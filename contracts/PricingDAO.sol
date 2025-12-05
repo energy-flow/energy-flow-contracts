@@ -57,6 +57,9 @@ contract PricingDAO is AccessControl {
     mapping(address => bool) public isConsumer;
     mapping(uint => mapping(address => VoteChoice)) public votes;
 
+    address[] private _members;
+    mapping(address => uint) private _memberIndex; // index + 1 (0 = non-membre)
+
     // ============ Events ============
 
     event MemberAdded(address indexed member, bool isProducer);
@@ -114,6 +117,9 @@ contract PricingDAO is AccessControl {
             consumersCount++;
         }
 
+        _members.push(_member);
+        _memberIndex[_member] = _members.length; // index + 1
+
         emit MemberAdded(_member, _isProducer);
     }
 
@@ -137,6 +143,20 @@ contract PricingDAO is AccessControl {
             consumersCount--;
         }
 
+        // Swap and pop pattern for efficient removal
+        // TODO: check pour une solition plus optimale
+        uint _index = _memberIndex[_member] - 1;
+        uint _lastIndex = _members.length - 1;
+
+        if (_index != _lastIndex) {
+            address _lastMember = _members[_lastIndex];
+            _members[_index] = _lastMember;
+            _memberIndex[_lastMember] = _index + 1;
+        }
+
+        _members.pop();
+        delete _memberIndex[_member];
+
         emit MemberRemoved(_member, _wasProducer);
     }
 
@@ -150,13 +170,12 @@ contract PricingDAO is AccessControl {
         require(workflowStatus == WorkflowStatus.ProposalRegistrationStarted, InvalidWorkflowStatus());
         require(_pricePerKWh != 0, InvalidPrice());
         require(!hasActiveProposal, ProposalAlreadyExists());
-        require(producersCount != 0 && consumersCount != 0, InsufficientMembers());
 
         proposalCounter++;
         activeProposalId = proposalCounter;
         hasActiveProposal = true;
 
-        PriceProposal storage _proposal = proposals[proposalCounter];
+        PriceProposal storage _proposal = proposals[activeProposalId];
         _proposal.pricePerKWh = _pricePerKWh;
         _proposal.snapshotProducersCount = producersCount;
         _proposal.snapshotConsumersCount = consumersCount;
@@ -215,9 +234,9 @@ contract PricingDAO is AccessControl {
 
     /**
      * @notice Executes the proposal after voting ends
-     * @dev Anyone can call this function after voting session ends
      */
-    function executeProposal() external {
+    function executeProposal() external onlyRole(ADMIN_ROLE) {
+        // TODO: rajouter une fin de date pour passer en votingSessionEnded plutot que de laisser la PMO décider
         require(workflowStatus == WorkflowStatus.VotingSessionEnded, InvalidWorkflowStatus());
         require(hasActiveProposal, NoActiveProposal());
 
@@ -248,6 +267,7 @@ contract PricingDAO is AccessControl {
      */
     function startProposalRegistration() external onlyRole(ADMIN_ROLE) {
         require(workflowStatus == WorkflowStatus.RegisteringVoters, InvalidWorkflowStatus());
+        require(producersCount != 0 && consumersCount != 0, InsufficientMembers());
 
         workflowStatus = WorkflowStatus.ProposalRegistrationStarted;
         emit WorkflowStatusChange(WorkflowStatus.RegisteringVoters, WorkflowStatus.ProposalRegistrationStarted);
@@ -258,6 +278,7 @@ contract PricingDAO is AccessControl {
      */
     function endProposalRegistration() external onlyRole(ADMIN_ROLE) {
         require(workflowStatus == WorkflowStatus.ProposalRegistrationStarted, InvalidWorkflowStatus());
+        require(hasActiveProposal, NoActiveProposal());
 
         workflowStatus = WorkflowStatus.ProposalRegistrationEnded;
         emit WorkflowStatusChange(WorkflowStatus.ProposalRegistrationStarted, WorkflowStatus.ProposalRegistrationEnded);
@@ -268,7 +289,6 @@ contract PricingDAO is AccessControl {
      */
     function startVotingSession() external onlyRole(ADMIN_ROLE) {
         require(workflowStatus == WorkflowStatus.ProposalRegistrationEnded, InvalidWorkflowStatus());
-        require(hasActiveProposal, NoActiveProposal());
 
         workflowStatus = WorkflowStatus.VotingSessionStarted;
         emit WorkflowStatusChange(WorkflowStatus.ProposalRegistrationEnded, WorkflowStatus.VotingSessionStarted);
@@ -303,6 +323,7 @@ contract PricingDAO is AccessControl {
      * @param _voter Address of the voter
      * @return Vote choice of the voter
      */
+    // TODO: Peut etre limiter uniquement au voter concerné
     function getVote(uint _proposalId, address _voter) external view returns (VoteChoice) {
         return votes[_proposalId][_voter];
     }
@@ -314,6 +335,15 @@ contract PricingDAO is AccessControl {
      */
     function getProposal(uint _proposalId) external view returns (PriceProposal memory) {
         return proposals[_proposalId];
+    }
+
+    /**
+     * @notice Gets all DAO members
+     * @return Array of member addresses
+     */
+    // TODO: get Active members
+    function getMembers() external view returns (address[] memory) {
+        return _members;
     }
 
     // ============ Internal Functions ============

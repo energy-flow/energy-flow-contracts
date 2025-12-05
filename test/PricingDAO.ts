@@ -26,7 +26,7 @@ const VoteChoice = {
 async function setUpPricingDAO() {
   const [admin, producer1, producer2, consumer1, consumer2, consumer3, user1] = await ethers.getSigners();
 
-  const initialPrice = ethers.parseUnits("0.15", 18); // 0.15 EUR/kWh
+  const initialPrice = ethers.parseUnits("0.15", 6); // 0.15 EUR/kWh
   const dao = await ethers.deployContract("PricingDAO", [admin.address, initialPrice]);
 
   return { dao, admin, producer1, producer2, consumer1, consumer2, consumer3, user1 };
@@ -41,7 +41,7 @@ async function setUpDAOWithProposal() {
   await dao.connect(admin).addMember(consumer2.address, false);
 
   await dao.connect(admin).startProposalRegistration();
-  const newPrice = ethers.parseUnits("0.18", 18);
+  const newPrice = ethers.parseUnits("0.18", 6);
   await dao.connect(admin).createProposal(newPrice);
   await dao.connect(admin).endProposalRegistration();
   await dao.connect(admin).startVotingSession();
@@ -57,12 +57,12 @@ describe("PricingDAO - Deployment", function () {
 
   it("Should set the initial price correctly", async function () {
     const { dao } = await setUpPricingDAO();
-    const initialPrice = ethers.parseUnits("0.15", 18);
+    const initialPrice = ethers.parseUnits("0.15", 6);
     expect(await dao.currentPrice()).to.equal(initialPrice);
   });
 
   it("Should revert when deploying with zero address as admin", async function () {
-    const initialPrice = ethers.parseUnits("0.15", 18);
+    const initialPrice = ethers.parseUnits("0.15", 6);
     await expect(
       ethers.deployContract("PricingDAO", [ethers.ZeroAddress, initialPrice])
     ).to.be.revertedWithCustomError({ interface: (await ethers.getContractFactory("PricingDAO")).interface }, "InvalidAddress");
@@ -192,7 +192,7 @@ describe("PricingDAO - Proposal Creation", function () {
   });
 
   it("Should create a proposal successfully", async function () {
-    const newPrice = ethers.parseUnits("0.18", 18);
+    const newPrice = ethers.parseUnits("0.18", 6);
 
     await dao.connect(admin).createProposal(newPrice);
 
@@ -206,7 +206,7 @@ describe("PricingDAO - Proposal Creation", function () {
   });
 
   it("Should emit ProposalCreated event", async function () {
-    const newPrice = ethers.parseUnits("0.18", 18);
+    const newPrice = ethers.parseUnits("0.18", 6);
 
     await expect(dao.connect(admin).createProposal(newPrice))
       .to.emit(dao, "ProposalCreated")
@@ -220,7 +220,7 @@ describe("PricingDAO - Proposal Creation", function () {
   });
 
   it("Should revert when active proposal already exists", async function () {
-    const newPrice = ethers.parseUnits("0.18", 18);
+    const newPrice = ethers.parseUnits("0.18", 6);
 
     await dao.connect(admin).createProposal(newPrice);
 
@@ -232,24 +232,18 @@ describe("PricingDAO - Proposal Creation", function () {
   it("Should revert when no producers exist", async function () {
     const { dao: newDao, admin: newAdmin, consumer1: newConsumer } = await setUpPricingDAO();
     await newDao.connect(newAdmin).addMember(newConsumer.address, false);
-    await newDao.connect(newAdmin).startProposalRegistration();
-
-    const newPrice = ethers.parseUnits("0.18", 18);
 
     await expect(
-      newDao.connect(newAdmin).createProposal(newPrice)
+      newDao.connect(newAdmin).startProposalRegistration()
     ).to.be.revertedWithCustomError(newDao, "InsufficientMembers");
   });
 
   it("Should revert when no consumers exist", async function () {
     const { dao: newDao, admin: newAdmin, producer1: newProducer } = await setUpPricingDAO();
     await newDao.connect(newAdmin).addMember(newProducer.address, true);
-    await newDao.connect(newAdmin).startProposalRegistration();
-
-    const newPrice = ethers.parseUnits("0.18", 18);
 
     await expect(
-      newDao.connect(newAdmin).createProposal(newPrice)
+      newDao.connect(newAdmin).startProposalRegistration()
     ).to.be.revertedWithCustomError(newDao, "InsufficientMembers");
   });
 
@@ -259,7 +253,7 @@ describe("PricingDAO - Proposal Creation", function () {
     await newDao.connect(newAdmin).addMember(newConsumer.address, false);
     // Don't call startProposalRegistration
 
-    const newPrice = ethers.parseUnits("0.18", 18);
+    const newPrice = ethers.parseUnits("0.18", 6);
 
     await expect(
       newDao.connect(newAdmin).createProposal(newPrice)
@@ -468,7 +462,7 @@ describe("PricingDAO - Proposal Execution", function () {
     await dao.connect(admin).resetWorkflow();
     await dao.connect(admin).startProposalRegistration();
 
-    const secondPrice = ethers.parseUnits("0.20", 18);
+    const secondPrice = ethers.parseUnits("0.20", 6);
     await dao.connect(admin).createProposal(secondPrice);
 
     expect(await dao.hasActiveProposal()).to.be.true;
@@ -493,7 +487,7 @@ describe("PricingDAO - Workflow Management", function () {
     await dao.connect(admin).startProposalRegistration();
     expect(await dao.workflowStatus()).to.equal(WorkflowStatus.ProposalRegistrationStarted);
 
-    const newPrice = ethers.parseUnits("0.18", 18);
+    const newPrice = ethers.parseUnits("0.18", 6);
     await dao.connect(admin).createProposal(newPrice);
 
     await dao.connect(admin).endProposalRegistration();
@@ -515,18 +509,17 @@ describe("PricingDAO - Workflow Management", function () {
     expect(await dao.workflowStatus()).to.equal(WorkflowStatus.RegisteringVoters);
   });
 
-  it("Should revert when starting voting without proposal", async function () {
+  it("Should revert when ending proposal without proposal", async function () {
     await dao.connect(admin).startProposalRegistration();
-    await dao.connect(admin).endProposalRegistration();
 
     await expect(
-      dao.connect(admin).startVotingSession()
+      dao.connect(admin).endProposalRegistration()
     ).to.be.revertedWithCustomError(dao, "NoActiveProposal");
   });
 
   it("Should not allow adding members during voting", async function () {
     await dao.connect(admin).startProposalRegistration();
-    const newPrice = ethers.parseUnits("0.18", 18);
+    const newPrice = ethers.parseUnits("0.18", 6);
     await dao.connect(admin).createProposal(newPrice);
     await dao.connect(admin).endProposalRegistration();
     await dao.connect(admin).startVotingSession();
@@ -534,5 +527,81 @@ describe("PricingDAO - Workflow Management", function () {
     await expect(
       dao.connect(admin).addMember(user1.address, true)
     ).to.be.revertedWithCustomError(dao, "VotingInProgress");
+  });
+});
+
+describe("PricingDAO - Member Enumeration", function () {
+  let dao: any;
+  let admin: any;
+  let producer1: any;
+  let producer2: any;
+  let consumer1: any;
+  let consumer2: any;
+
+  beforeEach(async function () {
+    ({ dao, admin, producer1, producer2, consumer1, consumer2 } = await setUpPricingDAO());
+  });
+
+  it("Should return members after adding", async function () {
+    await dao.connect(admin).addMember(producer1.address, true);
+    await dao.connect(admin).addMember(consumer1.address, false);
+
+    const members = await dao.getMembers();
+    expect(members).to.have.lengthOf(2);
+    expect(members).to.include(producer1.address);
+    expect(members).to.include(consumer1.address);
+  });
+
+  it("Should update correctly after removing a member", async function () {
+    await dao.connect(admin).addMember(producer1.address, true);
+    await dao.connect(admin).addMember(producer2.address, true);
+    await dao.connect(admin).addMember(consumer1.address, false);
+
+    await dao.connect(admin).removeMember(producer1.address);
+
+    const members = await dao.getMembers();
+    expect(members).to.have.lengthOf(2);
+    expect(members).to.not.include(producer1.address);
+    expect(members).to.include(producer2.address);
+    expect(members).to.include(consumer1.address);
+  });
+
+  it("Should handle swap-and-pop correctly when removing first member", async function () {
+    await dao.connect(admin).addMember(producer1.address, true);
+    await dao.connect(admin).addMember(producer2.address, true);
+    await dao.connect(admin).addMember(consumer1.address, false);
+    await dao.connect(admin).addMember(consumer2.address, false);
+
+    // Remove first member (producer1)
+    await dao.connect(admin).removeMember(producer1.address);
+
+    const members = await dao.getMembers();
+    expect(members).to.have.lengthOf(3);
+    expect(members).to.not.include(producer1.address);
+    // Last member (consumer2) should now be at first position
+    expect(members[0]).to.equal(consumer2.address);
+  });
+
+  it("Should handle removing last member correctly", async function () {
+    await dao.connect(admin).addMember(producer1.address, true);
+    await dao.connect(admin).addMember(consumer1.address, false);
+
+    // Remove last member (consumer1)
+    await dao.connect(admin).removeMember(consumer1.address);
+
+    const members = await dao.getMembers();
+    expect(members).to.have.lengthOf(1);
+    expect(members[0]).to.equal(producer1.address);
+  });
+
+  it("Should handle removing all members", async function () {
+    await dao.connect(admin).addMember(producer1.address, true);
+    await dao.connect(admin).addMember(consumer1.address, false);
+
+    await dao.connect(admin).removeMember(producer1.address);
+    await dao.connect(admin).removeMember(consumer1.address);
+
+    const members = await dao.getMembers();
+    expect(members).to.be.an("array").that.is.empty;
   });
 });

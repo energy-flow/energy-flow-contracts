@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: UNLICENSED
+// SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
@@ -48,7 +48,7 @@ contract EFT is ERC20, AccessControl {
     function burnFrom(address account, uint256 amount) external onlyRole(MINTER_ROLE) {
         require(amount > 0, "EFT: burn amount must be positive");
 
-        // Should I check for allowance
+        // TODO: Should check for allowance?
         _burn(account, amount);
         emit EnergyBurned(account, amount);
     }
