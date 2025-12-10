@@ -46,6 +46,7 @@ contract PricingDAO is AccessControl {
         uint consumersVotedAgainst;
     }
 
+    uint public constant MAX_MEMBERS = 500; // max allowed members to prevent out-of-gas
     uint public currentPrice; // in wei
     uint public maxPrice; // max allowed price (e.g., EDF tariff)
     uint public proposalCounter;
@@ -87,6 +88,7 @@ contract PricingDAO is AccessControl {
     error ProposalAlreadyApplied();
     error MaxPriceExceeded();
     error InvalidMaxPrice();
+    error MaxMembersReached();
 
     /**
      * @notice Initializes the contract with an administrator, PMO, initial price and max price
@@ -131,6 +133,7 @@ contract PricingDAO is AccessControl {
         require(workflowStatus != WorkflowStatus.VotingSessionStarted, VotingInProgress());
         require(_member != address(0), InvalidAddress());
         require(!isProducer[_member] && !isConsumer[_member], MemberAlreadyExists());
+        require(_members.length < MAX_MEMBERS, MaxMembersReached());
 
         _grantRole(MEMBER_ROLE, _member);
 

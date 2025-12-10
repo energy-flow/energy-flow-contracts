@@ -208,6 +208,10 @@ describe("PricingDAO - Member Management", function () {
       dao.connect(pmo).removeMember(user1.address)
     ).to.be.revertedWithCustomError(dao, "MemberNotFound");
   });
+
+  it("Should have MAX_MEMBERS constant set to 500", async function () {
+    expect(await dao.MAX_MEMBERS()).to.equal(500);
+  });
 });
 
 describe("PricingDAO - Proposal Creation", function () {
