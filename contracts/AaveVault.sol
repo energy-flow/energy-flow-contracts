@@ -73,15 +73,15 @@ contract AaveVault is Ownable, ReentrancyGuard {
         emit Deposited(_amount);
     }
 
-    function withdraw(address _pmo, uint _amount, address _to) external onlyOwner nonReentrant
+    function withdraw(address _pmo, uint _amount) external onlyOwner nonReentrant
         returns (uint amountWithdrawn)
     {
         require(_amount > 0, ZeroAmount());
         require(_pmo != address(0), ZeroAddress());
-        require(_to != address(0), ZeroAddress());
 
-        amountWithdrawn = aavePool.withdraw(address(eurc), _amount, _to);
+        amountWithdrawn = aavePool.withdraw(address(eurc), _amount, _pmo);
 
+        pmos[_pmo].totalWithdrawn += _amount;
         totalWithdrawn += _amount;
 
         emit Withdrawn(_amount);

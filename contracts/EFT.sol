@@ -28,7 +28,7 @@ contract EFT is ERC20, AccessControl {
     /**
      * @notice Crée de nouveaux tokens EFT
      * @dev Fonction réservée aux adresses ayant le rôle MINTER_ROLE
-     * @param to Adresse qui recevra les tokens
+     * @param to Adresse qui recevra les tokens (producteur)
      * @param amount Quantité de tokens à créer (en wei, 18 décimales)
      * @param meterId Identifiant unique du compteur d'énergie (pour traçabilité)
      */

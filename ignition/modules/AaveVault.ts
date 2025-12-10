@@ -11,12 +11,12 @@ export default buildModule("AaveVaultModule", (m) => {
   const eurc = m.getParameter("eurc", AaveV3Ethereum.ASSETS.EURC.UNDERLYING);
   const aEurc = m.getParameter("aEurc", AaveV3Ethereum.ASSETS.EURC.A_TOKEN);
 
-  const vault = m.contract("AaveVault", [
+  const aaveVault = m.contract("AaveVault", [
     deployer,
     poolAddressesProvider,
     eurc,
     aEurc,
   ]);
 
-  return { vault };
+  return { aaveVault };
 });

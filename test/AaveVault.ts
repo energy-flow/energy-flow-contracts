@@ -122,46 +122,37 @@ describe("AaveVault - Deposit", function () {
 
 describe("AaveVault - Withdraw", function () {
     it("Should withdraw EURC from Aave", async function () {
-        const { vault, eurc, aEurc, admin, user1 } = await setUpSmartContract();
+        const { vault, eurc, aEurc, admin } = await setUpSmartContract();
         const depositAmount = ethers.parseUnits("100", 6);
 
         // Setup: deposit first
         await eurc.connect(admin).transfer(await vault.getAddress(), depositAmount);
         await vault.connect(admin).deposit(admin.address, depositAmount);
 
-        const user1BalanceBefore = await eurc.balanceOf(user1.address);
+        const adminBalanceBefore = await eurc.balanceOf(admin.address);
 
-        // Withdraw to user1
-        await vault.connect(admin).withdraw(admin.address, depositAmount, user1.address);
+        // Withdraw to admin (PMO)
+        await vault.connect(admin).withdraw(admin.address, depositAmount);
 
         expect(await vault.totalWithdrawn()).to.equal(depositAmount);
-        expect(await eurc.balanceOf(user1.address)).to.equal(user1BalanceBefore + depositAmount);
+        expect(await eurc.balanceOf(admin.address)).to.equal(adminBalanceBefore + depositAmount);
         expect(await aEurc.balanceOf(await vault.getAddress())).to.equal(0);
     });
 
     it("Should revert when withdrawing zero amount", async function () {
-        const { vault, admin, user1 } = await setUpSmartContract();
+        const { vault, admin } = await setUpSmartContract();
 
         await expect(
-            vault.connect(admin).withdraw(admin.address, 0, user1.address)
+            vault.connect(admin).withdraw(admin.address, 0)
         ).to.be.revertedWithCustomError(vault, "ZeroAmount");
     });
 
     it("Should revert when PMO address is zero", async function () {
-        const { vault, admin, user1 } = await setUpSmartContract();
-        const withdrawAmount = ethers.parseUnits("100", 6);
-
-        await expect(
-            vault.connect(admin).withdraw(ethers.ZeroAddress, withdrawAmount, user1.address)
-        ).to.be.revertedWithCustomError(vault, "ZeroAddress");
-    });
-
-    it("Should revert when recipient address is zero", async function () {
         const { vault, admin } = await setUpSmartContract();
         const withdrawAmount = ethers.parseUnits("100", 6);
 
         await expect(
-            vault.connect(admin).withdraw(admin.address, withdrawAmount, ethers.ZeroAddress)
+            vault.connect(admin).withdraw(ethers.ZeroAddress, withdrawAmount)
         ).to.be.revertedWithCustomError(vault, "ZeroAddress");
     });
 
@@ -170,18 +161,18 @@ describe("AaveVault - Withdraw", function () {
         const withdrawAmount = ethers.parseUnits("100", 6);
 
         await expect(
-            vault.connect(user1).withdraw(user1.address, withdrawAmount, user1.address)
+            vault.connect(user1).withdraw(user1.address, withdrawAmount)
         ).to.be.revertedWithCustomError(vault, "OwnableUnauthorizedAccount");
     });
 
     it("Should emit Withdrawn event", async function () {
-        const { vault, eurc, admin, user1 } = await setUpSmartContract();
+        const { vault, eurc, admin } = await setUpSmartContract();
         const depositAmount = ethers.parseUnits("100", 6);
 
         await eurc.connect(admin).transfer(await vault.getAddress(), depositAmount);
         await vault.connect(admin).deposit(admin.address, depositAmount);
 
-        await expect(vault.connect(admin).withdraw(admin.address, depositAmount, user1.address))
+        await expect(vault.connect(admin).withdraw(admin.address, depositAmount))
             .to.emit(vault, "Withdrawn")
             .withArgs(depositAmount);
     });
@@ -243,24 +234,24 @@ describe("AaveVault - getAavePosition", function () {
     });
 
     it("Should return zero after full withdrawal", async function () {
-        const { vault, eurc, admin, user1 } = await setUpSmartContract();
+        const { vault, eurc, admin } = await setUpSmartContract();
         const depositAmount = ethers.parseUnits("100", 6);
 
         await eurc.connect(admin).transfer(await vault.getAddress(), depositAmount);
         await vault.connect(admin).deposit(admin.address, depositAmount);
-        await vault.connect(admin).withdraw(admin.address, depositAmount, user1.address);
+        await vault.connect(admin).withdraw(admin.address, depositAmount);
 
         expect(await vault.getAavePosition()).to.equal(0);
     });
 
     it("Should return partial balance after partial withdrawal", async function () {
-        const { vault, eurc, admin, user1 } = await setUpSmartContract();
+        const { vault, eurc, admin } = await setUpSmartContract();
         const depositAmount = ethers.parseUnits("100", 6);
         const withdrawAmount = ethers.parseUnits("40", 6);
 
         await eurc.connect(admin).transfer(await vault.getAddress(), depositAmount);
         await vault.connect(admin).deposit(admin.address, depositAmount);
-        await vault.connect(admin).withdraw(admin.address, withdrawAmount, user1.address);
+        await vault.connect(admin).withdraw(admin.address, withdrawAmount);
 
         expect(await vault.getAavePosition()).to.equal(depositAmount - withdrawAmount);
     });
