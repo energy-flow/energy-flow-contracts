@@ -9,11 +9,7 @@ import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
  * @dev Implements a voting system where producers and consumers each have 50% weight
  */
 contract PricingDAO is AccessControl {
-    /// @notice Admin role (Platform super-admin)
-    bytes32 public constant ADMIN_ROLE = DEFAULT_ADMIN_ROLE;
-    /// @notice PMO role (Local PMO operations)
     bytes32 public constant PMO_ROLE = keccak256("PMO_ROLE");
-    /// @notice Member role for voting rights
     bytes32 public constant MEMBER_ROLE = keccak256("MEMBER_ROLE");
 
     enum WorkflowStatus {
@@ -46,9 +42,7 @@ contract PricingDAO is AccessControl {
         uint consumersVotedAgainst;
     }
 
-    uint public constant MAX_MEMBERS = 500; // max allowed members to prevent out-of-gas
     uint public currentPrice; // in wei
-    uint public maxPrice; // max allowed price (e.g., EDF tariff)
     uint public proposalCounter;
     uint public activeProposalId;
     bool public hasActiveProposal;
@@ -61,9 +55,6 @@ contract PricingDAO is AccessControl {
     mapping(address => bool) public isConsumer;
     mapping(uint => mapping(address => VoteChoice)) public votes;
 
-    address[] private _members;
-    mapping(address => uint) private _memberIndex; // index + 1 (0 = non-membre)
-
     // ============ Events ============
 
     event MemberAdded(address indexed member, bool isProducer);
@@ -72,7 +63,6 @@ contract PricingDAO is AccessControl {
     event VoteCast(uint indexed proposalId, address indexed voter, bool isProducer, VoteChoice choice);
     event WorkflowStatusChange(WorkflowStatus previousStatus, WorkflowStatus newStatus);
     event PriceChanged(uint indexed proposalId, uint oldPrice, uint newPrice);
-    event MaxPriceUpdated(uint oldMaxPrice, uint newMaxPrice);
 
     error InvalidAddress();
     error InvalidPrice();
@@ -86,40 +76,18 @@ contract PricingDAO is AccessControl {
     error InvalidVoteChoice();
     error AlreadyVoted();
     error ProposalAlreadyApplied();
-    error MaxPriceExceeded();
-    error InvalidMaxPrice();
-    error MaxMembersReached();
 
     /**
-     * @notice Initializes the contract with an administrator, PMO, initial price and max price
-     * @param _initialAdmin Address of the platform super-admin
+     * @notice Initializes the contract with a PMO and initial price
      * @param _pmo Address of the local PMO
      * @param _initialPrice Initial price in wei
-     * @param _maxPrice Maximum allowed price in wei (must be > 0)
      */
-    constructor(address _initialAdmin, address _pmo, uint _initialPrice, uint _maxPrice) {
-        require(_initialAdmin != address(0), InvalidAddress());
+    constructor(address _pmo, uint _initialPrice) {
         require(_pmo != address(0), InvalidAddress());
         require(_initialPrice != 0, InvalidPrice());
-        require(_maxPrice != 0, InvalidMaxPrice());
 
-        _grantRole(ADMIN_ROLE, _initialAdmin);
         _grantRole(PMO_ROLE, _pmo);
         currentPrice = _initialPrice;
-        maxPrice = _maxPrice;
-    }
-
-    // ============ Price Configuration ============
-
-    /**
-     * @notice Sets the maximum allowed price for proposals (e.g., EDF tariff)
-     * @param _maxPrice New maximum price in wei (must be > 0)
-     */
-    function setMaxPrice(uint _maxPrice) external onlyRole(ADMIN_ROLE) {
-        require(_maxPrice != 0, InvalidMaxPrice());
-        uint _oldMaxPrice = maxPrice;
-        maxPrice = _maxPrice;
-        emit MaxPriceUpdated(_oldMaxPrice, _maxPrice);
     }
 
     // ============ Member Management ============
@@ -133,7 +101,6 @@ contract PricingDAO is AccessControl {
         require(workflowStatus != WorkflowStatus.VotingSessionStarted, VotingInProgress());
         require(_member != address(0), InvalidAddress());
         require(!isProducer[_member] && !isConsumer[_member], MemberAlreadyExists());
-        require(_members.length < MAX_MEMBERS, MaxMembersReached());
 
         _grantRole(MEMBER_ROLE, _member);
 
@@ -144,9 +111,6 @@ contract PricingDAO is AccessControl {
             isConsumer[_member] = true;
             consumersCount++;
         }
-
-        _members.push(_member);
-        _memberIndex[_member] = _members.length; // index + 1
 
         emit MemberAdded(_member, _isProducer);
     }
@@ -171,20 +135,6 @@ contract PricingDAO is AccessControl {
             consumersCount--;
         }
 
-        // Swap and pop pattern for efficient removal
-        // TODO: check pour une solition plus optimale
-        uint _index = _memberIndex[_member] - 1;
-        uint _lastIndex = _members.length - 1;
-
-        if (_index != _lastIndex) {
-            address _lastMember = _members[_lastIndex];
-            _members[_index] = _lastMember;
-            _memberIndex[_lastMember] = _index + 1;
-        }
-
-        _members.pop();
-        delete _memberIndex[_member];
-
         emit MemberRemoved(_member, _wasProducer);
     }
 
@@ -197,7 +147,6 @@ contract PricingDAO is AccessControl {
     function createProposal(uint _pricePerKWh) external onlyRole(PMO_ROLE) {
         require(workflowStatus == WorkflowStatus.ProposalRegistrationStarted, InvalidWorkflowStatus());
         require(_pricePerKWh != 0, InvalidPrice());
-        require(_pricePerKWh <= maxPrice, MaxPriceExceeded());
         require(!hasActiveProposal, ProposalAlreadyExists());
 
         proposalCounter++;
@@ -264,7 +213,6 @@ contract PricingDAO is AccessControl {
     /**
      * @notice Executes the proposal after voting ends
      */
-    // TODO: voir si on pourrait pas ajouter une variable votedPrice. Puis rajouter une fonction pour set VotedPrice = currentPrice
     function executeProposal() external onlyRole(PMO_ROLE) {
         // TODO: rajouter une fin de date pour passer en votingSessionEnded plutot que de laisser la PMO décider
         require(workflowStatus == WorkflowStatus.VotingSessionEnded, InvalidWorkflowStatus());
@@ -353,7 +301,6 @@ contract PricingDAO is AccessControl {
      * @param _voter Address of the voter
      * @return Vote choice of the voter
      */
-    // TODO: Peut etre limiter uniquement au voter concerné
     function getVote(uint _proposalId, address _voter) external view returns (VoteChoice) {
         return votes[_proposalId][_voter];
     }
@@ -365,15 +312,6 @@ contract PricingDAO is AccessControl {
      */
     function getProposal(uint _proposalId) external view returns (PriceProposal memory) {
         return proposals[_proposalId];
-    }
-
-    /**
-     * @notice Gets all DAO members
-     * @return Array of member addresses
-     */
-    // TODO: get Active members
-    function getMembers() external view returns (address[] memory) {
-        return _members;
     }
 
     // ============ Internal Functions ============

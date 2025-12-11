@@ -3,7 +3,6 @@ import { network } from "hardhat";
 
 const { ethers } = await network.connect();
 
-const ADMIN_ROLE = ethers.ZeroHash;
 const PMO_ROLE = ethers.keccak256(ethers.toUtf8Bytes("PMO_ROLE"));
 const MEMBER_ROLE = ethers.keccak256(ethers.toUtf8Bytes("MEMBER_ROLE"));
 
@@ -25,17 +24,16 @@ const VoteChoice = {
 };
 
 async function setUpPricingDAO() {
-  const [admin, pmo, producer1, producer2, consumer1, consumer2, consumer3, user1] = await ethers.getSigners();
+  const [pmo, producer1, producer2, consumer1, consumer2, consumer3, user1] = await ethers.getSigners();
 
   const initialPrice = ethers.parseUnits("0.15", 6); // 0.15 EUR/kWh
-  const maxPrice = ethers.parseUnits("0.25", 6); // 0.25 EUR/kWh (e.g., EDF tariff)
-  const dao = await ethers.deployContract("PricingDAO", [admin.address, pmo.address, initialPrice, maxPrice]);
+  const dao = await ethers.deployContract("PricingDAO", [pmo.address, initialPrice]);
 
-  return { dao, admin, pmo, producer1, producer2, consumer1, consumer2, consumer3, user1, maxPrice };
+  return { dao, pmo, producer1, producer2, consumer1, consumer2, consumer3, user1 };
 }
 
 async function setUpDAOWithProposal() {
-  const { dao, admin, pmo, producer1, producer2, consumer1, consumer2, consumer3, user1 } = await setUpPricingDAO();
+  const { dao, pmo, producer1, producer2, consumer1, consumer2, consumer3, user1 } = await setUpPricingDAO();
 
   await dao.connect(pmo).addMember(producer1.address, true);
   await dao.connect(pmo).addMember(producer2.address, true);
@@ -48,15 +46,10 @@ async function setUpDAOWithProposal() {
   await dao.connect(pmo).endProposalRegistration();
   await dao.connect(pmo).startVotingSession();
 
-  return { dao, admin, pmo, producer1, producer2, consumer1, consumer2, consumer3, user1, newPrice };
+  return { dao, pmo, producer1, producer2, consumer1, consumer2, consumer3, user1, newPrice };
 }
 
 describe("PricingDAO - Deployment", function () {
-  it("Should set the admin role correctly", async function () {
-    const { dao, admin } = await setUpPricingDAO();
-    expect(await dao.hasRole(ADMIN_ROLE, admin.address)).to.be.true;
-  });
-
   it("Should set the PMO role correctly", async function () {
     const { dao, pmo } = await setUpPricingDAO();
     expect(await dao.hasRole(PMO_ROLE, pmo.address)).to.be.true;
@@ -68,42 +61,17 @@ describe("PricingDAO - Deployment", function () {
     expect(await dao.currentPrice()).to.equal(initialPrice);
   });
 
-  it("Should set the initial maxPrice correctly", async function () {
-    const { dao, maxPrice } = await setUpPricingDAO();
-    expect(await dao.maxPrice()).to.equal(maxPrice);
-  });
-
-  it("Should revert when deploying with zero maxPrice", async function () {
-    const [admin, pmo] = await ethers.getSigners();
-    const initialPrice = ethers.parseUnits("0.15", 6);
-    await expect(
-      ethers.deployContract("PricingDAO", [admin.address, pmo.address, initialPrice, 0])
-    ).to.be.revertedWithCustomError({ interface: (await ethers.getContractFactory("PricingDAO")).interface }, "InvalidMaxPrice");
-  });
-
-  it("Should revert when deploying with zero address as admin", async function () {
-    const [, pmo] = await ethers.getSigners();
-    const initialPrice = ethers.parseUnits("0.15", 6);
-    const maxPrice = ethers.parseUnits("0.25", 6);
-    await expect(
-      ethers.deployContract("PricingDAO", [ethers.ZeroAddress, pmo.address, initialPrice, maxPrice])
-    ).to.be.revertedWithCustomError({ interface: (await ethers.getContractFactory("PricingDAO")).interface }, "InvalidAddress");
-  });
-
   it("Should revert when deploying with zero address as PMO", async function () {
-    const [admin] = await ethers.getSigners();
     const initialPrice = ethers.parseUnits("0.15", 6);
-    const maxPrice = ethers.parseUnits("0.25", 6);
     await expect(
-      ethers.deployContract("PricingDAO", [admin.address, ethers.ZeroAddress, initialPrice, maxPrice])
+      ethers.deployContract("PricingDAO", [ethers.ZeroAddress, initialPrice])
     ).to.be.revertedWithCustomError({ interface: (await ethers.getContractFactory("PricingDAO")).interface }, "InvalidAddress");
   });
 
   it("Should revert when deploying with zero initial price", async function () {
-    const [admin, pmo] = await ethers.getSigners();
-    const maxPrice = ethers.parseUnits("0.25", 6);
+    const [pmo] = await ethers.getSigners();
     await expect(
-      ethers.deployContract("PricingDAO", [admin.address, pmo.address, 0, maxPrice])
+      ethers.deployContract("PricingDAO", [pmo.address, 0])
     ).to.be.revertedWithCustomError({ interface: (await ethers.getContractFactory("PricingDAO")).interface }, "InvalidPrice");
   });
 
@@ -207,10 +175,6 @@ describe("PricingDAO - Member Management", function () {
     await expect(
       dao.connect(pmo).removeMember(user1.address)
     ).to.be.revertedWithCustomError(dao, "MemberNotFound");
-  });
-
-  it("Should have MAX_MEMBERS constant set to 500", async function () {
-    expect(await dao.MAX_MEMBERS()).to.equal(500);
   });
 });
 
@@ -566,219 +530,26 @@ describe("PricingDAO - Workflow Management", function () {
   });
 });
 
-describe("PricingDAO - Max Price Configuration", function () {
-  let dao: any;
-  let admin: any;
-  let pmo: any;
-  let producer1: any;
-  let consumer1: any;
-  let user1: any;
-
-  beforeEach(async function () {
-    ({ dao, admin, pmo, producer1, consumer1, user1 } = await setUpPricingDAO());
-    await dao.connect(pmo).addMember(producer1.address, true);
-    await dao.connect(pmo).addMember(consumer1.address, false);
-  });
-
-  it("Should have initial maxPrice from deployment", async function () {
-    const expectedMaxPrice = ethers.parseUnits("0.25", 6);
-    expect(await dao.maxPrice()).to.equal(expectedMaxPrice);
-  });
-
-  it("Should allow admin to set maxPrice", async function () {
-    const edfPrice = ethers.parseUnits("0.25", 6);
-    await dao.connect(admin).setMaxPrice(edfPrice);
-
-    expect(await dao.maxPrice()).to.equal(edfPrice);
-  });
-
-  it("Should emit MaxPriceUpdated event", async function () {
-    const oldMaxPrice = ethers.parseUnits("0.25", 6); // initial maxPrice from fixture
-    const newMaxPrice = ethers.parseUnits("0.30", 6);
-
-    await expect(dao.connect(admin).setMaxPrice(newMaxPrice))
-      .to.emit(dao, "MaxPriceUpdated")
-      .withArgs(oldMaxPrice, newMaxPrice);
-  });
-
-  it("Should emit MaxPriceUpdated with correct old and new values", async function () {
-    const firstPrice = ethers.parseUnits("0.25", 6);
-    const secondPrice = ethers.parseUnits("0.30", 6);
-
-    await dao.connect(admin).setMaxPrice(firstPrice);
-
-    await expect(dao.connect(admin).setMaxPrice(secondPrice))
-      .to.emit(dao, "MaxPriceUpdated")
-      .withArgs(firstPrice, secondPrice);
-  });
-
-  it("Should revert when non-admin tries to set maxPrice", async function () {
-    const edfPrice = ethers.parseUnits("0.25", 6);
-
-    await expect(
-      dao.connect(user1).setMaxPrice(edfPrice)
-    ).to.be.revertedWithCustomError(dao, "AccessControlUnauthorizedAccount");
-  });
-
-  it("Should revert when PMO tries to set maxPrice", async function () {
-    const edfPrice = ethers.parseUnits("0.25", 6);
-
-    await expect(
-      dao.connect(pmo).setMaxPrice(edfPrice)
-    ).to.be.revertedWithCustomError(dao, "AccessControlUnauthorizedAccount");
-  });
-
-  it("Should revert when setting maxPrice to zero", async function () {
-    await expect(
-      dao.connect(admin).setMaxPrice(0)
-    ).to.be.revertedWithCustomError(dao, "InvalidMaxPrice");
-  });
-
-  it("Should allow proposal at exact maxPrice", async function () {
-    const maxPrice = ethers.parseUnits("0.20", 6);
-    await dao.connect(admin).setMaxPrice(maxPrice);
-    await dao.connect(pmo).startProposalRegistration();
-
-    await dao.connect(pmo).createProposal(maxPrice);
-
-    expect(await dao.hasActiveProposal()).to.be.true;
-    const proposal = await dao.getProposal(1);
-    expect(proposal.pricePerKWh).to.equal(maxPrice);
-  });
-
-  it("Should allow proposal below maxPrice", async function () {
-    const maxPrice = ethers.parseUnits("0.25", 6);
-    const proposedPrice = ethers.parseUnits("0.20", 6);
-    await dao.connect(admin).setMaxPrice(maxPrice);
-    await dao.connect(pmo).startProposalRegistration();
-
-    await dao.connect(pmo).createProposal(proposedPrice);
-
-    expect(await dao.hasActiveProposal()).to.be.true;
-  });
-
-  it("Should revert proposal above maxPrice", async function () {
-    const maxPrice = ethers.parseUnits("0.20", 6);
-    const proposedPrice = ethers.parseUnits("0.25", 6);
-    await dao.connect(admin).setMaxPrice(maxPrice);
-    await dao.connect(pmo).startProposalRegistration();
-
-    await expect(
-      dao.connect(pmo).createProposal(proposedPrice)
-    ).to.be.revertedWithCustomError(dao, "MaxPriceExceeded");
-  });
-
-});
-
-
-describe("PricingDAO - Member Enumeration", function () {
-  let dao: any;
-  let pmo: any;
-  let producer1: any;
-  let producer2: any;
-  let consumer1: any;
-  let consumer2: any;
-
-  beforeEach(async function () {
-    ({ dao, pmo, producer1, producer2, consumer1, consumer2 } = await setUpPricingDAO());
-  });
-
-  it("Should return members after adding", async function () {
-    await dao.connect(pmo).addMember(producer1.address, true);
-    await dao.connect(pmo).addMember(consumer1.address, false);
-
-    const members = await dao.getMembers();
-    expect(members).to.have.lengthOf(2);
-    expect(members).to.include(producer1.address);
-    expect(members).to.include(consumer1.address);
-  });
-
-  it("Should update correctly after removing a member", async function () {
-    await dao.connect(pmo).addMember(producer1.address, true);
-    await dao.connect(pmo).addMember(producer2.address, true);
-    await dao.connect(pmo).addMember(consumer1.address, false);
-
-    await dao.connect(pmo).removeMember(producer1.address);
-
-    const members = await dao.getMembers();
-    expect(members).to.have.lengthOf(2);
-    expect(members).to.not.include(producer1.address);
-    expect(members).to.include(producer2.address);
-    expect(members).to.include(consumer1.address);
-  });
-
-  it("Should handle swap-and-pop correctly when removing first member", async function () {
-    await dao.connect(pmo).addMember(producer1.address, true);
-    await dao.connect(pmo).addMember(producer2.address, true);
-    await dao.connect(pmo).addMember(consumer1.address, false);
-    await dao.connect(pmo).addMember(consumer2.address, false);
-
-    // Remove first member (producer1)
-    await dao.connect(pmo).removeMember(producer1.address);
-
-    const members = await dao.getMembers();
-    expect(members).to.have.lengthOf(3);
-    expect(members).to.not.include(producer1.address);
-    // Last member (consumer2) should now be at first position
-    expect(members[0]).to.equal(consumer2.address);
-  });
-
-  it("Should handle removing last member correctly", async function () {
-    await dao.connect(pmo).addMember(producer1.address, true);
-    await dao.connect(pmo).addMember(consumer1.address, false);
-
-    // Remove last member (consumer1)
-    await dao.connect(pmo).removeMember(consumer1.address);
-
-    const members = await dao.getMembers();
-    expect(members).to.have.lengthOf(1);
-    expect(members[0]).to.equal(producer1.address);
-  });
-
-  it("Should handle removing all members", async function () {
-    await dao.connect(pmo).addMember(producer1.address, true);
-    await dao.connect(pmo).addMember(consumer1.address, false);
-
-    await dao.connect(pmo).removeMember(producer1.address);
-    await dao.connect(pmo).removeMember(consumer1.address);
-
-    const members = await dao.getMembers();
-    expect(members).to.be.an("array").that.is.empty;
-  });
-});
-
 describe("PricingDAO - Role Separation", function () {
   let dao: any;
-  let admin: any;
   let pmo: any;
   let producer1: any;
   let consumer1: any;
   let user1: any;
 
   beforeEach(async function () {
-    ({ dao, admin, pmo, producer1, consumer1, user1 } = await setUpPricingDAO());
+    ({ dao, pmo, producer1, consumer1, user1 } = await setUpPricingDAO());
   });
 
-  it("Should allow admin to set maxPrice but not PMO operations", async function () {
-    const edfPrice = ethers.parseUnits("0.25", 6);
-    await dao.connect(admin).setMaxPrice(edfPrice);
-    expect(await dao.maxPrice()).to.equal(edfPrice);
-
-    // Admin cannot add members (PMO operation)
+  it("Should not allow non-PMO to manage members", async function () {
     await expect(
-      dao.connect(admin).addMember(producer1.address, true)
+      dao.connect(user1).addMember(producer1.address, true)
     ).to.be.revertedWithCustomError(dao, "AccessControlUnauthorizedAccount");
   });
 
-  it("Should allow PMO to manage members but not set maxPrice", async function () {
+  it("Should allow PMO to manage members", async function () {
     await dao.connect(pmo).addMember(producer1.address, true);
     expect(await dao.isProducer(producer1.address)).to.be.true;
-
-    // PMO cannot set maxPrice (admin operation)
-    const edfPrice = ethers.parseUnits("0.25", 6);
-    await expect(
-      dao.connect(pmo).setMaxPrice(edfPrice)
-    ).to.be.revertedWithCustomError(dao, "AccessControlUnauthorizedAccount");
   });
 
   it("Should allow PMO to manage full workflow", async function () {
@@ -800,12 +571,12 @@ describe("PricingDAO - Role Separation", function () {
     expect(await dao.currentPrice()).to.equal(newPrice);
   });
 
-  it("Should not allow admin to manage workflow", async function () {
+  it("Should not allow non-PMO to manage workflow", async function () {
     await dao.connect(pmo).addMember(producer1.address, true);
     await dao.connect(pmo).addMember(consumer1.address, false);
 
     await expect(
-      dao.connect(admin).startProposalRegistration()
+      dao.connect(user1).startProposalRegistration()
     ).to.be.revertedWithCustomError(dao, "AccessControlUnauthorizedAccount");
   });
 });
