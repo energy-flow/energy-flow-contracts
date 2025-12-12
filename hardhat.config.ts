@@ -23,14 +23,6 @@ export default defineConfig({
     },
   },
   networks: {
-    hardhatMainnet: {
-      type: "edr-simulated",
-      chainType: "l1",
-    },
-    hardhatOp: {
-      type: "edr-simulated",
-      chainType: "op",
-    },
     mainnetFork: {
       type: "edr-simulated",
       chainId: 1,
@@ -44,8 +36,14 @@ export default defineConfig({
     sepolia: {
       type: "http",
       chainType: "l1",
+      chainId: 11155111,
       url: configVariable("SEPOLIA_RPC_URL"),
       accounts: [configVariable("SEPOLIA_PRIVATE_KEY")],
+    },
+  },
+  verify: {
+    etherscan: {
+      apiKey: configVariable("ETHERSCAN_API_KEY"),
     },
   },
 });
