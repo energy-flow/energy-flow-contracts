@@ -1,40 +1,72 @@
-# EnergyFlow
+# Energy Flow Contracts
 
-## Project Overview
+Smart contracts Solidity pour la plateforme d'autoconsommation collective Energy Flow.
 
-## Usage
+## Concept
 
-### Running Tests
+- **1 EFT = 1 kWh** de droits d'énergie locale
+- Gouvernance DAO bi-collège (producteurs/consommateurs)
+- Intégration DeFi avec Aave V3
 
-To run all the tests in the project, execute the following command:
+## Contrats
 
-```shell
-npx hardhat test
-npx hardhat test --coverage
+| Contrat | Description |
+|---------|-------------|
+| `EFT.sol` | Token ERC20 représentant les kWh produits (mint/burn avec meterId) |
+| `PricingDAO.sol` | Gouvernance du prix kWh avec vote bi-collège (50%/50%) |
+| `AaveVault.sol` | Vault DeFi pour dépôts EURC vers Aave V3 |
+
+## Stack technique
+
+- Solidity 0.8.28
+- Hardhat 3.x avec EDR
+- OpenZeppelin Contracts 5.4.0
+- Hardhat Ignition (déploiement)
+
+## Installation
+
+```bash
+npm install
 ```
 
-### Make a deployment to Sepolia
+## Commandes
 
-This project includes an example Ignition module to deploy the contract. You can deploy this module to a locally simulated chain or to Sepolia.
+```bash
+# Tests
+npx hardhat test                    # Tests unitaires
+npx hardhat test --coverage         # Avec couverture
+npx hardhat test test/AaveVault.fork.ts --network mainnetFork  # Tests fork
 
-To run the deployment to a local chain:
-
-```shell
-npx hardhat ignition deploy ignition/modules/EFT.ts
+# Déploiement
+npx hardhat ignition deploy ignition/modules/DeployLocal.ts              # Local
+npx hardhat ignition deploy ignition/modules/DeploySepolia.ts --network sepolia  # Sepolia
 ```
 
-To run the deployment to Sepolia, you need an account with funds to send the transaction. The provided Hardhat configuration includes a Configuration Variable called `SEPOLIA_PRIVATE_KEY`, which you can use to set the private key of the account you want to use.
+## Configuration
 
-You can set the `SEPOLIA_PRIVATE_KEY` variable using the `hardhat-keystore` plugin or by setting it as an environment variable.
+Définir les variables via Hardhat Keystore :
 
-To set the `SEPOLIA_PRIVATE_KEY` config variable using `hardhat-keystore`:
-
-```shell
+```bash
 npx hardhat keystore set SEPOLIA_PRIVATE_KEY
+npx hardhat keystore set SEPOLIA_RPC_URL
+npx hardhat keystore set MAINNET_RPC_URL      # Pour tests fork
 ```
 
-After setting the variable, you can run the deployment with the Sepolia network:
+## Adresses déployées (Sepolia)
 
-```shell
-npx hardhat ignition deploy --network sepolia ignition/modules/EFT.ts
-```
+| Contrat | Adresse |
+|---------|---------|
+| PricingDAO | `0x5325677B41090e00067807465B927B5cB13580Ce` |
+| EFT | `0xBEeb8a8b5a3F1C206b47907432c82Ecec9d99A84` |
+| AaveVault | `0x41c131B337c57bf08eBeb384bc498E40E3351A79` |
+
+## Tests
+
+~100 tests couvrant :
+- EFT : mint/burn, rôles, transferts, événements
+- PricingDAO : workflow 6 étapes, membres, propositions, votes bi-collège
+- AaveVault : dépôt/retrait, whitelist, tracking PMO (mocks + fork mainnet)
+
+## Licence
+
+MIT
