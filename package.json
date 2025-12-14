@@ -18,6 +18,7 @@
     "typescript": "~5.8.0"
   },
   "dependencies": {
+    "@bgd-labs/aave-address-book": "^4.37.1",
     "@openzeppelin/contracts": "^5.4.0"
   }
 }

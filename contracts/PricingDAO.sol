@@ -9,9 +9,7 @@ import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
  * @dev Implements a voting system where producers and consumers each have 50% weight
  */
 contract PricingDAO is AccessControl {
-    /// @notice Admin role (PMO address)
-    bytes32 public constant ADMIN_ROLE = DEFAULT_ADMIN_ROLE;
-    /// @notice Member role for voting rights
+    bytes32 public constant PMO_ROLE = keccak256("PMO_ROLE");
     bytes32 public constant MEMBER_ROLE = keccak256("MEMBER_ROLE");
 
     enum WorkflowStatus {
@@ -80,15 +78,15 @@ contract PricingDAO is AccessControl {
     error ProposalAlreadyApplied();
 
     /**
-     * @notice Initializes the contract with an administrator and initial price
-     * @param _initialAdmin Address of the initial administrator (PMO)
+     * @notice Initializes the contract with a PMO and initial price
+     * @param _pmo Address of the local PMO
      * @param _initialPrice Initial price in wei
      */
-    constructor(address _initialAdmin, uint _initialPrice) {
-        require(_initialAdmin != address(0), InvalidAddress());
+    constructor(address _pmo, uint _initialPrice) {
+        require(_pmo != address(0), InvalidAddress());
         require(_initialPrice != 0, InvalidPrice());
 
-        _grantRole(ADMIN_ROLE, _initialAdmin);
+        _grantRole(PMO_ROLE, _pmo);
         currentPrice = _initialPrice;
     }
 
@@ -99,7 +97,7 @@ contract PricingDAO is AccessControl {
      * @param _member Address of the member
      * @param _isProducer True if producer, false if consumer
      */
-    function addMember(address _member, bool _isProducer) external onlyRole(ADMIN_ROLE) {
+    function addMember(address _member, bool _isProducer) external onlyRole(PMO_ROLE) {
         require(workflowStatus != WorkflowStatus.VotingSessionStarted, VotingInProgress());
         require(_member != address(0), InvalidAddress());
         require(!isProducer[_member] && !isConsumer[_member], MemberAlreadyExists());
@@ -121,7 +119,7 @@ contract PricingDAO is AccessControl {
      * @notice Removes a member from the DAO
      * @param _member Address of the member to remove
      */
-    function removeMember(address _member) external onlyRole(ADMIN_ROLE) {
+    function removeMember(address _member) external onlyRole(PMO_ROLE) {
         require(workflowStatus != WorkflowStatus.VotingSessionStarted, VotingInProgress());
         require(isProducer[_member] || isConsumer[_member], MemberNotFound());
 
@@ -146,17 +144,16 @@ contract PricingDAO is AccessControl {
      * @notice Creates a new price proposal
      * @param _pricePerKWh Proposed price in wei
      */
-    function createProposal(uint _pricePerKWh) external onlyRole(ADMIN_ROLE) {
+    function createProposal(uint _pricePerKWh) external onlyRole(PMO_ROLE) {
         require(workflowStatus == WorkflowStatus.ProposalRegistrationStarted, InvalidWorkflowStatus());
         require(_pricePerKWh != 0, InvalidPrice());
         require(!hasActiveProposal, ProposalAlreadyExists());
-        require(producersCount != 0 && consumersCount != 0, InsufficientMembers());
 
         proposalCounter++;
         activeProposalId = proposalCounter;
         hasActiveProposal = true;
 
-        PriceProposal storage _proposal = proposals[proposalCounter];
+        PriceProposal storage _proposal = proposals[activeProposalId];
         _proposal.pricePerKWh = _pricePerKWh;
         _proposal.snapshotProducersCount = producersCount;
         _proposal.snapshotConsumersCount = consumersCount;
@@ -215,9 +212,9 @@ contract PricingDAO is AccessControl {
 
     /**
      * @notice Executes the proposal after voting ends
-     * @dev Anyone can call this function after voting session ends
      */
-    function executeProposal() external {
+    function executeProposal() external onlyRole(PMO_ROLE) {
+        // TODO: rajouter une fin de date pour passer en votingSessionEnded plutot que de laisser la PMO décider
         require(workflowStatus == WorkflowStatus.VotingSessionEnded, InvalidWorkflowStatus());
         require(hasActiveProposal, NoActiveProposal());
 
@@ -246,8 +243,9 @@ contract PricingDAO is AccessControl {
     /**
      * @notice Starts the proposal registration phase
      */
-    function startProposalRegistration() external onlyRole(ADMIN_ROLE) {
+    function startProposalRegistration() external onlyRole(PMO_ROLE) {
         require(workflowStatus == WorkflowStatus.RegisteringVoters, InvalidWorkflowStatus());
+        require(producersCount != 0 && consumersCount != 0, InsufficientMembers());
 
         workflowStatus = WorkflowStatus.ProposalRegistrationStarted;
         emit WorkflowStatusChange(WorkflowStatus.RegisteringVoters, WorkflowStatus.ProposalRegistrationStarted);
@@ -256,8 +254,9 @@ contract PricingDAO is AccessControl {
     /**
      * @notice Ends the proposal registration phase
      */
-    function endProposalRegistration() external onlyRole(ADMIN_ROLE) {
+    function endProposalRegistration() external onlyRole(PMO_ROLE) {
         require(workflowStatus == WorkflowStatus.ProposalRegistrationStarted, InvalidWorkflowStatus());
+        require(hasActiveProposal, NoActiveProposal());
 
         workflowStatus = WorkflowStatus.ProposalRegistrationEnded;
         emit WorkflowStatusChange(WorkflowStatus.ProposalRegistrationStarted, WorkflowStatus.ProposalRegistrationEnded);
@@ -266,9 +265,8 @@ contract PricingDAO is AccessControl {
     /**
      * @notice Starts the voting session
      */
-    function startVotingSession() external onlyRole(ADMIN_ROLE) {
+    function startVotingSession() external onlyRole(PMO_ROLE) {
         require(workflowStatus == WorkflowStatus.ProposalRegistrationEnded, InvalidWorkflowStatus());
-        require(hasActiveProposal, NoActiveProposal());
 
         workflowStatus = WorkflowStatus.VotingSessionStarted;
         emit WorkflowStatusChange(WorkflowStatus.ProposalRegistrationEnded, WorkflowStatus.VotingSessionStarted);
@@ -277,7 +275,7 @@ contract PricingDAO is AccessControl {
     /**
      * @notice Ends the voting session
      */
-    function endVotingSession() external onlyRole(ADMIN_ROLE) {
+    function endVotingSession() external onlyRole(PMO_ROLE) {
         require(workflowStatus == WorkflowStatus.VotingSessionStarted, InvalidWorkflowStatus());
 
         workflowStatus = WorkflowStatus.VotingSessionEnded;
@@ -288,7 +286,7 @@ contract PricingDAO is AccessControl {
      * @notice Resets the workflow for a new voting cycle
      * @dev Can only be called after votes have been tallied
      */
-    function resetWorkflow() external onlyRole(ADMIN_ROLE) {
+    function resetWorkflow() external onlyRole(PMO_ROLE) {
         require(workflowStatus == WorkflowStatus.VotesTallied, InvalidWorkflowStatus());
 
         workflowStatus = WorkflowStatus.RegisteringVoters;

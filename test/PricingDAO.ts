@@ -3,7 +3,7 @@ import { network } from "hardhat";
 
 const { ethers } = await network.connect();
 
-const ADMIN_ROLE = ethers.ZeroHash;
+const PMO_ROLE = ethers.keccak256(ethers.toUtf8Bytes("PMO_ROLE"));
 const MEMBER_ROLE = ethers.keccak256(ethers.toUtf8Bytes("MEMBER_ROLE"));
 
 
@@ -24,54 +24,54 @@ const VoteChoice = {
 };
 
 async function setUpPricingDAO() {
-  const [admin, producer1, producer2, consumer1, consumer2, consumer3, user1] = await ethers.getSigners();
+  const [pmo, producer1, producer2, consumer1, consumer2, consumer3, user1] = await ethers.getSigners();
 
-  const initialPrice = ethers.parseUnits("0.15", 18); // 0.15 EUR/kWh
-  const dao = await ethers.deployContract("PricingDAO", [admin.address, initialPrice]);
+  const initialPrice = ethers.parseUnits("0.15", 6); // 0.15 EUR/kWh
+  const dao = await ethers.deployContract("PricingDAO", [pmo.address, initialPrice]);
 
-  return { dao, admin, producer1, producer2, consumer1, consumer2, consumer3, user1 };
+  return { dao, pmo, producer1, producer2, consumer1, consumer2, consumer3, user1 };
 }
 
 async function setUpDAOWithProposal() {
-  const { dao, admin, producer1, producer2, consumer1, consumer2, consumer3, user1 } = await setUpPricingDAO();
+  const { dao, pmo, producer1, producer2, consumer1, consumer2, consumer3, user1 } = await setUpPricingDAO();
 
-  await dao.connect(admin).addMember(producer1.address, true);
-  await dao.connect(admin).addMember(producer2.address, true);
-  await dao.connect(admin).addMember(consumer1.address, false);
-  await dao.connect(admin).addMember(consumer2.address, false);
+  await dao.connect(pmo).addMember(producer1.address, true);
+  await dao.connect(pmo).addMember(producer2.address, true);
+  await dao.connect(pmo).addMember(consumer1.address, false);
+  await dao.connect(pmo).addMember(consumer2.address, false);
 
-  await dao.connect(admin).startProposalRegistration();
-  const newPrice = ethers.parseUnits("0.18", 18);
-  await dao.connect(admin).createProposal(newPrice);
-  await dao.connect(admin).endProposalRegistration();
-  await dao.connect(admin).startVotingSession();
+  await dao.connect(pmo).startProposalRegistration();
+  const newPrice = ethers.parseUnits("0.18", 6);
+  await dao.connect(pmo).createProposal(newPrice);
+  await dao.connect(pmo).endProposalRegistration();
+  await dao.connect(pmo).startVotingSession();
 
-  return { dao, admin, producer1, producer2, consumer1, consumer2, consumer3, user1, newPrice };
+  return { dao, pmo, producer1, producer2, consumer1, consumer2, consumer3, user1, newPrice };
 }
 
 describe("PricingDAO - Deployment", function () {
-  it("Should set the admin role correctly", async function () {
-    const { dao, admin } = await setUpPricingDAO();
-    expect(await dao.hasRole(ADMIN_ROLE, admin.address)).to.be.true;
+  it("Should set the PMO role correctly", async function () {
+    const { dao, pmo } = await setUpPricingDAO();
+    expect(await dao.hasRole(PMO_ROLE, pmo.address)).to.be.true;
   });
 
   it("Should set the initial price correctly", async function () {
     const { dao } = await setUpPricingDAO();
-    const initialPrice = ethers.parseUnits("0.15", 18);
+    const initialPrice = ethers.parseUnits("0.15", 6);
     expect(await dao.currentPrice()).to.equal(initialPrice);
   });
 
-  it("Should revert when deploying with zero address as admin", async function () {
-    const initialPrice = ethers.parseUnits("0.15", 18);
+  it("Should revert when deploying with zero address as PMO", async function () {
+    const initialPrice = ethers.parseUnits("0.15", 6);
     await expect(
       ethers.deployContract("PricingDAO", [ethers.ZeroAddress, initialPrice])
     ).to.be.revertedWithCustomError({ interface: (await ethers.getContractFactory("PricingDAO")).interface }, "InvalidAddress");
   });
 
   it("Should revert when deploying with zero initial price", async function () {
-    const [admin] = await ethers.getSigners();
+    const [pmo] = await ethers.getSigners();
     await expect(
-      ethers.deployContract("PricingDAO", [admin.address, 0])
+      ethers.deployContract("PricingDAO", [pmo.address, 0])
     ).to.be.revertedWithCustomError({ interface: (await ethers.getContractFactory("PricingDAO")).interface }, "InvalidPrice");
   });
 
@@ -90,17 +90,17 @@ describe("PricingDAO - Deployment", function () {
 
 describe("PricingDAO - Member Management", function () {
   let dao: any;
-  let admin: any;
+  let pmo: any;
   let producer1: any;
   let consumer1: any;
   let user1: any;
 
   beforeEach(async function () {
-    ({ dao, admin, producer1, consumer1, user1 } = await setUpPricingDAO());
+    ({ dao, pmo, producer1, consumer1, user1 } = await setUpPricingDAO());
   });
 
   it("Should add a producer successfully", async function () {
-    await dao.connect(admin).addMember(producer1.address, true);
+    await dao.connect(pmo).addMember(producer1.address, true);
 
     expect(await dao.isProducer(producer1.address)).to.be.true;
     expect(await dao.hasRole(MEMBER_ROLE, producer1.address)).to.be.true;
@@ -108,7 +108,7 @@ describe("PricingDAO - Member Management", function () {
   });
 
   it("Should add a consumer successfully", async function () {
-    await dao.connect(admin).addMember(consumer1.address, false);
+    await dao.connect(pmo).addMember(consumer1.address, false);
 
     expect(await dao.isConsumer(consumer1.address)).to.be.true;
     expect(await dao.hasRole(MEMBER_ROLE, consumer1.address)).to.be.true;
@@ -116,18 +116,18 @@ describe("PricingDAO - Member Management", function () {
   });
 
   it("Should emit MemberAdded event when adding producer", async function () {
-    await expect(dao.connect(admin).addMember(producer1.address, true))
+    await expect(dao.connect(pmo).addMember(producer1.address, true))
       .to.emit(dao, "MemberAdded")
       .withArgs(producer1.address, true);
   });
 
   it("Should emit MemberAdded event when adding consumer", async function () {
-    await expect(dao.connect(admin).addMember(consumer1.address, false))
+    await expect(dao.connect(pmo).addMember(consumer1.address, false))
       .to.emit(dao, "MemberAdded")
       .withArgs(consumer1.address, false);
   });
 
-  it("Should revert when non-admin tries to add member", async function () {
+  it("Should revert when non-PMO tries to add member", async function () {
     await expect(
       dao.connect(user1).addMember(producer1.address, true)
     ).to.be.revertedWithCustomError(dao, "AccessControlUnauthorizedAccount");
@@ -135,20 +135,20 @@ describe("PricingDAO - Member Management", function () {
 
   it("Should revert when adding zero address as member", async function () {
     await expect(
-      dao.connect(admin).addMember(ethers.ZeroAddress, true)
+      dao.connect(pmo).addMember(ethers.ZeroAddress, true)
     ).to.be.revertedWithCustomError(dao, "InvalidAddress");
   });
 
   it("Should revert when adding same member twice", async function () {
-    await dao.connect(admin).addMember(producer1.address, true);
+    await dao.connect(pmo).addMember(producer1.address, true);
     await expect(
-      dao.connect(admin).addMember(producer1.address, false)
+      dao.connect(pmo).addMember(producer1.address, false)
     ).to.be.revertedWithCustomError(dao, "MemberAlreadyExists");
   });
 
   it("Should remove a producer successfully", async function () {
-    await dao.connect(admin).addMember(producer1.address, true);
-    await dao.connect(admin).removeMember(producer1.address);
+    await dao.connect(pmo).addMember(producer1.address, true);
+    await dao.connect(pmo).removeMember(producer1.address);
 
     expect(await dao.isProducer(producer1.address)).to.be.false;
     expect(await dao.hasRole(MEMBER_ROLE, producer1.address)).to.be.false;
@@ -156,8 +156,8 @@ describe("PricingDAO - Member Management", function () {
   });
 
   it("Should remove a consumer successfully", async function () {
-    await dao.connect(admin).addMember(consumer1.address, false);
-    await dao.connect(admin).removeMember(consumer1.address);
+    await dao.connect(pmo).addMember(consumer1.address, false);
+    await dao.connect(pmo).removeMember(consumer1.address);
 
     expect(await dao.isConsumer(consumer1.address)).to.be.false;
     expect(await dao.hasRole(MEMBER_ROLE, consumer1.address)).to.be.false;
@@ -165,36 +165,36 @@ describe("PricingDAO - Member Management", function () {
   });
 
   it("Should emit MemberRemoved event", async function () {
-    await dao.connect(admin).addMember(producer1.address, true);
-    await expect(dao.connect(admin).removeMember(producer1.address))
+    await dao.connect(pmo).addMember(producer1.address, true);
+    await expect(dao.connect(pmo).removeMember(producer1.address))
       .to.emit(dao, "MemberRemoved")
       .withArgs(producer1.address, true);
   });
 
   it("Should revert when removing non-existent member", async function () {
     await expect(
-      dao.connect(admin).removeMember(user1.address)
+      dao.connect(pmo).removeMember(user1.address)
     ).to.be.revertedWithCustomError(dao, "MemberNotFound");
   });
 });
 
 describe("PricingDAO - Proposal Creation", function () {
   let dao: any;
-  let admin: any;
+  let pmo: any;
   let producer1: any;
   let consumer1: any;
 
   beforeEach(async function () {
-    ({ dao, admin, producer1, consumer1 } = await setUpPricingDAO());
-    await dao.connect(admin).addMember(producer1.address, true);
-    await dao.connect(admin).addMember(consumer1.address, false);
-    await dao.connect(admin).startProposalRegistration();
+    ({ dao, pmo, producer1, consumer1 } = await setUpPricingDAO());
+    await dao.connect(pmo).addMember(producer1.address, true);
+    await dao.connect(pmo).addMember(consumer1.address, false);
+    await dao.connect(pmo).startProposalRegistration();
   });
 
   it("Should create a proposal successfully", async function () {
-    const newPrice = ethers.parseUnits("0.18", 18);
+    const newPrice = ethers.parseUnits("0.18", 6);
 
-    await dao.connect(admin).createProposal(newPrice);
+    await dao.connect(pmo).createProposal(newPrice);
 
     expect(await dao.hasActiveProposal()).to.be.true;
     expect(await dao.proposalCounter()).to.equal(1);
@@ -206,70 +206,64 @@ describe("PricingDAO - Proposal Creation", function () {
   });
 
   it("Should emit ProposalCreated event", async function () {
-    const newPrice = ethers.parseUnits("0.18", 18);
+    const newPrice = ethers.parseUnits("0.18", 6);
 
-    await expect(dao.connect(admin).createProposal(newPrice))
+    await expect(dao.connect(pmo).createProposal(newPrice))
       .to.emit(dao, "ProposalCreated")
       .withArgs(1, newPrice);
   });
 
   it("Should revert when creating proposal with zero price", async function () {
     await expect(
-      dao.connect(admin).createProposal(0)
+      dao.connect(pmo).createProposal(0)
     ).to.be.revertedWithCustomError(dao, "InvalidPrice");
   });
 
   it("Should revert when active proposal already exists", async function () {
-    const newPrice = ethers.parseUnits("0.18", 18);
+    const newPrice = ethers.parseUnits("0.18", 6);
 
-    await dao.connect(admin).createProposal(newPrice);
+    await dao.connect(pmo).createProposal(newPrice);
 
     await expect(
-      dao.connect(admin).createProposal(newPrice)
+      dao.connect(pmo).createProposal(newPrice)
     ).to.be.revertedWithCustomError(dao, "ProposalAlreadyExists");
   });
 
   it("Should revert when no producers exist", async function () {
-    const { dao: newDao, admin: newAdmin, consumer1: newConsumer } = await setUpPricingDAO();
-    await newDao.connect(newAdmin).addMember(newConsumer.address, false);
-    await newDao.connect(newAdmin).startProposalRegistration();
-
-    const newPrice = ethers.parseUnits("0.18", 18);
+    const { dao: newDao, pmo: newPmo, consumer1: newConsumer } = await setUpPricingDAO();
+    await newDao.connect(newPmo).addMember(newConsumer.address, false);
 
     await expect(
-      newDao.connect(newAdmin).createProposal(newPrice)
+      newDao.connect(newPmo).startProposalRegistration()
     ).to.be.revertedWithCustomError(newDao, "InsufficientMembers");
   });
 
   it("Should revert when no consumers exist", async function () {
-    const { dao: newDao, admin: newAdmin, producer1: newProducer } = await setUpPricingDAO();
-    await newDao.connect(newAdmin).addMember(newProducer.address, true);
-    await newDao.connect(newAdmin).startProposalRegistration();
-
-    const newPrice = ethers.parseUnits("0.18", 18);
+    const { dao: newDao, pmo: newPmo, producer1: newProducer } = await setUpPricingDAO();
+    await newDao.connect(newPmo).addMember(newProducer.address, true);
 
     await expect(
-      newDao.connect(newAdmin).createProposal(newPrice)
+      newDao.connect(newPmo).startProposalRegistration()
     ).to.be.revertedWithCustomError(newDao, "InsufficientMembers");
   });
 
   it("Should revert when workflow is not in ProposalRegistrationStarted", async function () {
-    const { dao: newDao, admin: newAdmin, producer1: newProducer, consumer1: newConsumer } = await setUpPricingDAO();
-    await newDao.connect(newAdmin).addMember(newProducer.address, true);
-    await newDao.connect(newAdmin).addMember(newConsumer.address, false);
+    const { dao: newDao, pmo: newPmo, producer1: newProducer, consumer1: newConsumer } = await setUpPricingDAO();
+    await newDao.connect(newPmo).addMember(newProducer.address, true);
+    await newDao.connect(newPmo).addMember(newConsumer.address, false);
     // Don't call startProposalRegistration
 
-    const newPrice = ethers.parseUnits("0.18", 18);
+    const newPrice = ethers.parseUnits("0.18", 6);
 
     await expect(
-      newDao.connect(newAdmin).createProposal(newPrice)
+      newDao.connect(newPmo).createProposal(newPrice)
     ).to.be.revertedWithCustomError(newDao, "InvalidWorkflowStatus");
   });
 });
 
 describe("PricingDAO - Voting", function () {
   let dao: any;
-  let admin: any;
+  let pmo: any;
   let producer1: any;
   let producer2: any;
   let consumer1: any;
@@ -277,7 +271,7 @@ describe("PricingDAO - Voting", function () {
   let user1: any;
 
   beforeEach(async function () {
-    ({ dao, admin, producer1, producer2, consumer1, consumer2, user1 } = await setUpDAOWithProposal());
+    ({ dao, pmo, producer1, producer2, consumer1, consumer2, user1 } = await setUpDAOWithProposal());
   });
 
   it("Should allow producer to vote for", async function () {
@@ -375,9 +369,9 @@ describe("PricingDAO - Voting", function () {
   });
 
   it("Should revert when voting session not started", async function () {
-    const { dao: newDao, admin: newAdmin, producer1: newProducer, consumer1: newConsumer } = await setUpPricingDAO();
-    await newDao.connect(newAdmin).addMember(newProducer.address, true);
-    await newDao.connect(newAdmin).addMember(newConsumer.address, false);
+    const { dao: newDao, pmo: newPmo, producer1: newProducer, consumer1: newConsumer } = await setUpPricingDAO();
+    await newDao.connect(newPmo).addMember(newProducer.address, true);
+    await newDao.connect(newPmo).addMember(newConsumer.address, false);
 
     await expect(
       newDao.connect(newProducer).vote(VoteChoice.For)
@@ -387,7 +381,7 @@ describe("PricingDAO - Voting", function () {
 
 describe("PricingDAO - Proposal Execution", function () {
   let dao: any;
-  let admin: any;
+  let pmo: any;
   let producer1: any;
   let producer2: any;
   let consumer1: any;
@@ -395,7 +389,7 @@ describe("PricingDAO - Proposal Execution", function () {
   let newPrice: any;
 
   beforeEach(async function () {
-    ({ dao, admin, producer1, producer2, consumer1, consumer2, newPrice } = await setUpDAOWithProposal());
+    ({ dao, pmo, producer1, producer2, consumer1, consumer2, newPrice } = await setUpDAOWithProposal());
   });
 
   it("Should execute proposal and update price when majority votes for", async function () {
@@ -404,8 +398,8 @@ describe("PricingDAO - Proposal Execution", function () {
     await dao.connect(consumer1).vote(VoteChoice.For);
     await dao.connect(consumer2).vote(VoteChoice.For);
 
-    await dao.connect(admin).endVotingSession();
-    await dao.connect(admin).executeProposal();
+    await dao.connect(pmo).endVotingSession();
+    await dao.connect(pmo).executeProposal();
 
     expect(await dao.currentPrice()).to.equal(newPrice);
     expect(await dao.hasActiveProposal()).to.be.false;
@@ -419,8 +413,8 @@ describe("PricingDAO - Proposal Execution", function () {
     await dao.connect(consumer1).vote(VoteChoice.Against);
     await dao.connect(consumer2).vote(VoteChoice.Against);
 
-    await dao.connect(admin).endVotingSession();
-    await dao.connect(admin).executeProposal();
+    await dao.connect(pmo).endVotingSession();
+    await dao.connect(pmo).executeProposal();
 
     expect(await dao.currentPrice()).to.equal(oldPrice);
   });
@@ -433,16 +427,16 @@ describe("PricingDAO - Proposal Execution", function () {
     await dao.connect(consumer1).vote(VoteChoice.For);
     await dao.connect(consumer2).vote(VoteChoice.For);
 
-    await dao.connect(admin).endVotingSession();
+    await dao.connect(pmo).endVotingSession();
 
-    await expect(dao.connect(admin).executeProposal())
+    await expect(dao.connect(pmo).executeProposal())
       .to.emit(dao, "PriceChanged")
       .withArgs(1, oldPrice, newPrice);
   });
 
   it("Should revert when voting session not ended", async function () {
     await expect(
-      dao.connect(admin).executeProposal()
+      dao.connect(pmo).executeProposal()
     ).to.be.revertedWithCustomError(dao, "InvalidWorkflowStatus");
   });
 
@@ -450,12 +444,12 @@ describe("PricingDAO - Proposal Execution", function () {
     await dao.connect(producer1).vote(VoteChoice.For);
     await dao.connect(consumer1).vote(VoteChoice.For);
 
-    await dao.connect(admin).endVotingSession();
-    await dao.connect(admin).executeProposal();
+    await dao.connect(pmo).endVotingSession();
+    await dao.connect(pmo).executeProposal();
 
     // After execution, workflow is VotesTallied, so it fails on workflow check first
     await expect(
-      dao.connect(admin).executeProposal()
+      dao.connect(pmo).executeProposal()
     ).to.be.revertedWithCustomError(dao, "InvalidWorkflowStatus");
   });
 
@@ -463,13 +457,13 @@ describe("PricingDAO - Proposal Execution", function () {
     await dao.connect(producer1).vote(VoteChoice.For);
     await dao.connect(consumer1).vote(VoteChoice.For);
 
-    await dao.connect(admin).endVotingSession();
-    await dao.connect(admin).executeProposal();
-    await dao.connect(admin).resetWorkflow();
-    await dao.connect(admin).startProposalRegistration();
+    await dao.connect(pmo).endVotingSession();
+    await dao.connect(pmo).executeProposal();
+    await dao.connect(pmo).resetWorkflow();
+    await dao.connect(pmo).startProposalRegistration();
 
-    const secondPrice = ethers.parseUnits("0.20", 18);
-    await dao.connect(admin).createProposal(secondPrice);
+    const secondPrice = ethers.parseUnits("0.20", 6);
+    await dao.connect(pmo).createProposal(secondPrice);
 
     expect(await dao.hasActiveProposal()).to.be.true;
     expect(await dao.proposalCounter()).to.equal(2);
@@ -478,61 +472,111 @@ describe("PricingDAO - Proposal Execution", function () {
 
 describe("PricingDAO - Workflow Management", function () {
   let dao: any;
-  let admin: any;
+  let pmo: any;
   let producer1: any;
   let consumer1: any;
   let user1: any;
 
   beforeEach(async function () {
-    ({ dao, admin, producer1, consumer1, user1 } = await setUpPricingDAO());
-    await dao.connect(admin).addMember(producer1.address, true);
-    await dao.connect(admin).addMember(consumer1.address, false);
+    ({ dao, pmo, producer1, consumer1, user1 } = await setUpPricingDAO());
+    await dao.connect(pmo).addMember(producer1.address, true);
+    await dao.connect(pmo).addMember(consumer1.address, false);
   });
 
   it("Should transition through full workflow", async function () {
-    await dao.connect(admin).startProposalRegistration();
+    await dao.connect(pmo).startProposalRegistration();
     expect(await dao.workflowStatus()).to.equal(WorkflowStatus.ProposalRegistrationStarted);
 
-    const newPrice = ethers.parseUnits("0.18", 18);
-    await dao.connect(admin).createProposal(newPrice);
+    const newPrice = ethers.parseUnits("0.18", 6);
+    await dao.connect(pmo).createProposal(newPrice);
 
-    await dao.connect(admin).endProposalRegistration();
+    await dao.connect(pmo).endProposalRegistration();
     expect(await dao.workflowStatus()).to.equal(WorkflowStatus.ProposalRegistrationEnded);
 
-    await dao.connect(admin).startVotingSession();
+    await dao.connect(pmo).startVotingSession();
     expect(await dao.workflowStatus()).to.equal(WorkflowStatus.VotingSessionStarted);
 
     await dao.connect(producer1).vote(VoteChoice.For);
     await dao.connect(consumer1).vote(VoteChoice.For);
 
-    await dao.connect(admin).endVotingSession();
+    await dao.connect(pmo).endVotingSession();
     expect(await dao.workflowStatus()).to.equal(WorkflowStatus.VotingSessionEnded);
 
-    await dao.connect(admin).executeProposal();
+    await dao.connect(pmo).executeProposal();
     expect(await dao.workflowStatus()).to.equal(WorkflowStatus.VotesTallied);
 
-    await dao.connect(admin).resetWorkflow();
+    await dao.connect(pmo).resetWorkflow();
     expect(await dao.workflowStatus()).to.equal(WorkflowStatus.RegisteringVoters);
   });
 
-  it("Should revert when starting voting without proposal", async function () {
-    await dao.connect(admin).startProposalRegistration();
-    await dao.connect(admin).endProposalRegistration();
+  it("Should revert when ending proposal without proposal", async function () {
+    await dao.connect(pmo).startProposalRegistration();
 
     await expect(
-      dao.connect(admin).startVotingSession()
+      dao.connect(pmo).endProposalRegistration()
     ).to.be.revertedWithCustomError(dao, "NoActiveProposal");
   });
 
   it("Should not allow adding members during voting", async function () {
-    await dao.connect(admin).startProposalRegistration();
-    const newPrice = ethers.parseUnits("0.18", 18);
-    await dao.connect(admin).createProposal(newPrice);
-    await dao.connect(admin).endProposalRegistration();
-    await dao.connect(admin).startVotingSession();
+    await dao.connect(pmo).startProposalRegistration();
+    const newPrice = ethers.parseUnits("0.18", 6);
+    await dao.connect(pmo).createProposal(newPrice);
+    await dao.connect(pmo).endProposalRegistration();
+    await dao.connect(pmo).startVotingSession();
 
     await expect(
-      dao.connect(admin).addMember(user1.address, true)
+      dao.connect(pmo).addMember(user1.address, true)
     ).to.be.revertedWithCustomError(dao, "VotingInProgress");
+  });
+});
+
+describe("PricingDAO - Role Separation", function () {
+  let dao: any;
+  let pmo: any;
+  let producer1: any;
+  let consumer1: any;
+  let user1: any;
+
+  beforeEach(async function () {
+    ({ dao, pmo, producer1, consumer1, user1 } = await setUpPricingDAO());
+  });
+
+  it("Should not allow non-PMO to manage members", async function () {
+    await expect(
+      dao.connect(user1).addMember(producer1.address, true)
+    ).to.be.revertedWithCustomError(dao, "AccessControlUnauthorizedAccount");
+  });
+
+  it("Should allow PMO to manage members", async function () {
+    await dao.connect(pmo).addMember(producer1.address, true);
+    expect(await dao.isProducer(producer1.address)).to.be.true;
+  });
+
+  it("Should allow PMO to manage full workflow", async function () {
+    await dao.connect(pmo).addMember(producer1.address, true);
+    await dao.connect(pmo).addMember(consumer1.address, false);
+
+    await dao.connect(pmo).startProposalRegistration();
+    const newPrice = ethers.parseUnits("0.18", 6);
+    await dao.connect(pmo).createProposal(newPrice);
+    await dao.connect(pmo).endProposalRegistration();
+    await dao.connect(pmo).startVotingSession();
+
+    await dao.connect(producer1).vote(VoteChoice.For);
+    await dao.connect(consumer1).vote(VoteChoice.For);
+
+    await dao.connect(pmo).endVotingSession();
+    await dao.connect(pmo).executeProposal();
+
+    expect(await dao.currentPrice()).to.equal(newPrice);
+  });
+
+  it("Should not allow non-PMO to manage workflow", async function () {
+    await dao.connect(pmo).addMember(producer1.address, true);
+    await dao.connect(pmo).addMember(consumer1.address, false);
+
+    await expect(
+      dao.connect(user1).startProposalRegistration()
+    ).to.be.revertedWithCustomError(dao, "AccessControlUnauthorizedAccount");
   });
 });
