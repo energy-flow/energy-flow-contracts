@@ -27,8 +27,8 @@ jobs:
       - name: Compile contracts
         run: npx hardhat compile
 
-      - name: Run tests with coverage
-        run: npx hardhat test --coverage
+      - name: Run tests with coverage (excluding fork tests)
+        run: npx hardhat test test/EFT.ts test/PricingDAO.ts test/AaveVault.ts --coverage
 
       - name: Check coverage threshold (80%)
         run: |
