@@ -10,8 +10,7 @@ export default buildModule("EFTModule", (m) => {
   // Définir le rôle de minter (calculé de la même manière que dans le contrat)
   const MINTER_ROLE = m.staticCall(token, "MINTER_ROLE", []);
 
-  // Optionnel: Accorder le rôle de minter au deployer
-  // Vous pouvez modifier cette adresse selon vos besoins
+  // Accorde le rôle de minter au deployer
   m.call(token, "grantRole", [MINTER_ROLE, deployer], {
     id: "grant_minter_role_to_deployer",
   });
