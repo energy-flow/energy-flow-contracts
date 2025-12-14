@@ -18,5 +18,8 @@ export default buildModule("AaveVaultModule", (m) => {
     aEurc,
   ]);
 
+  // Whitelist the deployer (admin) as authorized depositor
+  m.call(aaveVault, "addDepositor", [deployer], { id: "whitelistAdmin" });
+
   return { aaveVault };
 });
