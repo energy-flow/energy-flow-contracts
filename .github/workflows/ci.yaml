@@ -1,0 +1,44 @@
+name: Smart Contracts CI
+
+on:
+  push:
+    branches: [develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Run Tests & Coverage
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Compile contracts
+        run: npx hardhat compile
+
+      - name: Run tests with coverage
+        run: npx hardhat test --coverage
+
+      - name: Check coverage threshold (80%)
+        run: |
+          # Parse lcov.info to calculate line coverage
+          LINES_FOUND=$(grep -E "^LF:" coverage/lcov.info | cut -d: -f2 | awk '{sum+=$1} END {print sum}')
+          LINES_HIT=$(grep -E "^LH:" coverage/lcov.info | cut -d: -f2 | awk '{sum+=$1} END {print sum}')
+          COVERAGE=$(echo "scale=2; $LINES_HIT * 100 / $LINES_FOUND" | bc)
+          echo "Line coverage: $COVERAGE% ($LINES_HIT/$LINES_FOUND lines)"
+          if (( $(echo "$COVERAGE < 80" | bc -l) )); then
+            echo "::error::Coverage $COVERAGE% is below 80% threshold"
+            exit 1
+          fi
+          echo "::notice::Coverage check passed with $COVERAGE%"

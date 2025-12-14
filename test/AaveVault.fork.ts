@@ -2,7 +2,8 @@ import { expect } from "chai";
 import { network } from "hardhat";
 import { AaveV3Ethereum } from "@bgd-labs/aave-address-book";
 
-const { ethers } = await network.connect();
+// Connexion explicite au réseau mainnetFork
+const { ethers } = await network.connect("mainnetFork");
 
 const POOL_ADDRESSES_PROVIDER = AaveV3Ethereum.POOL_ADDRESSES_PROVIDER;
 const EURC_ADDRESS = AaveV3Ethereum.ASSETS.EURC.UNDERLYING;
@@ -33,23 +34,29 @@ async function setUpForkTest() {
         AEURC_ADDRESS,
     ]);
 
-    // Impersonner le whale EURC pour obtenir des tokens de test
-    // dit au noeud hardhat d'autoriser les transactions signees par adresse whale sans cle privee
-    await ethers.provider.send("hardhat_impersonateAccount", [EURC_WHALE]);
+    const vaultAddress = await vault.getAddress();
 
+    // Ajouter le PMO comme déposant autorisé
+    await vault.connect(admin).addDepositor(pmo.address);
+
+    // Impersonner le whale EURC pour obtenir des tokens de test
+    await ethers.provider.send("hardhat_impersonateAccount", [EURC_WHALE]);
     const whale = await ethers.getSigner(EURC_WHALE);
 
-    // Envoyer de l'ETH au whale pour payer le gas (simulation)
+    // Envoyer de l'ETH au whale pour payer le gas
     await admin.sendTransaction({
         to: EURC_WHALE,
         value: ethers.parseEther("1"),
     });
 
-    // Transférer des EURC du whale vers le vault (simulation locale)
+    // Transférer des EURC du whale vers le PMO (pas le vault)
     const transferAmount = ethers.parseUnits("1000", 6); // 1000 EURC
-    await eurc.connect(whale).transfer(await vault.getAddress(), transferAmount);
+    await eurc.connect(whale).transfer(pmo.address, transferAmount);
 
     await ethers.provider.send("hardhat_stopImpersonatingAccount", [EURC_WHALE]);
+
+    // Le PMO doit approuver le vault pour dépenser ses EURC
+    await eurc.connect(pmo).approve(vaultAddress, ethers.MaxUint256);
 
     return { vault, eurc, aEurc, admin, pmo, recipient };
 }
@@ -59,14 +66,14 @@ describe("AaveVault Fork - Integration Tests", function () {
     this.timeout(60000);
 
     it("Should deposit EURC into real Aave Pool", async function () {
-        const { vault, aEurc, admin, pmo } = await setUpForkTest();
+        const { vault, aEurc, pmo } = await setUpForkTest();
         const depositAmount = ethers.parseUnits("100", 6); // 100 EURC
 
         const vaultAddress = await vault.getAddress();
         const aEurcBalanceBefore = await aEurc.balanceOf(vaultAddress);
 
-        // Deposit via le vault
-        await vault.connect(admin).deposit(pmo.address, depositAmount);
+        // Deposit via le vault (le PMO dépose ses propres EURC)
+        await vault.connect(pmo).deposit(depositAmount);
 
         // Vérifier que le vault a reçu des aEURC
         const aEurcBalanceAfter = await aEurc.balanceOf(vaultAddress);
@@ -77,36 +84,35 @@ describe("AaveVault Fork - Integration Tests", function () {
     });
 
     it("Should withdraw EURC from real Aave Pool", async function () {
-        // TODO: mettre les noms de variables plus explicites
-        const { vault, eurc, admin, pmo, recipient } = await setUpForkTest();
+        const { vault, eurc, pmo } = await setUpForkTest();
         const depositAmount = ethers.parseUnits("100", 6);
         const withdrawAmount = ethers.parseUnits("50", 6);
 
         // Deposit
-        await vault.connect(admin).deposit(pmo.address, depositAmount);
+        await vault.connect(pmo).deposit(depositAmount);
 
-        const recipientBalanceBefore = await eurc.balanceOf(recipient.address);
+        const pmoBalanceBefore = await eurc.balanceOf(pmo.address);
 
-        // Withdraw from pool to recepient
-        await vault.connect(admin).withdraw(pmo.address, withdrawAmount, recipient.address);
+        // Withdraw (les fonds reviennent au PMO appelant)
+        await vault.connect(pmo).withdraw(withdrawAmount);
 
-        // Vérifier que le recipient a reçu les EURC
-        const recipientBalanceAfter = await eurc.balanceOf(recipient.address);
-        expect(recipientBalanceAfter).to.equal(recipientBalanceBefore + withdrawAmount);
+        // Vérifier que le PMO a reçu les EURC
+        const pmoBalanceAfter = await eurc.balanceOf(pmo.address);
+        expect(pmoBalanceAfter).to.equal(pmoBalanceBefore + withdrawAmount);
 
         // Vérifier le tracking interne
         expect(await vault.totalWithdrawn()).to.equal(withdrawAmount);
     });
 
     it("Should report correct Aave position", async function () {
-        const { vault, admin, pmo } = await setUpForkTest();
+        const { vault, pmo } = await setUpForkTest();
         const depositAmount = ethers.parseUnits("500", 6);
 
         // Position initiale = 0
         expect(await vault.getAavePosition()).to.equal(0);
 
         // Après deposit
-        await vault.connect(admin).deposit(pmo.address, depositAmount);
+        await vault.connect(pmo).deposit(depositAmount);
 
         // La position devrait être >= depositAmount (peut être légèrement plus avec les intérêts)
         const position = await vault.getAavePosition();
@@ -114,17 +120,17 @@ describe("AaveVault Fork - Integration Tests", function () {
     });
 
     it("Should handle multiple deposits and withdrawals", async function () {
-        const { vault, eurc, admin, pmo, recipient } = await setUpForkTest();
+        const { vault, pmo } = await setUpForkTest();
 
         // Plusieurs deposits
-        await vault.connect(admin).deposit(pmo.address, ethers.parseUnits("100", 6));
-        await vault.connect(admin).deposit(pmo.address, ethers.parseUnits("200", 6));
-        await vault.connect(admin).deposit(pmo.address, ethers.parseUnits("150", 6));
+        await vault.connect(pmo).deposit(ethers.parseUnits("100", 6));
+        await vault.connect(pmo).deposit(ethers.parseUnits("200", 6));
+        await vault.connect(pmo).deposit(ethers.parseUnits("150", 6));
 
         expect(await vault.totalDeposited()).to.equal(ethers.parseUnits("450", 6));
 
         // Withdrawal partiel
-        await vault.connect(admin).withdraw(pmo.address, ethers.parseUnits("300", 6), recipient.address);
+        await vault.connect(pmo).withdraw(ethers.parseUnits("300", 6));
 
         expect(await vault.totalWithdrawn()).to.equal(ethers.parseUnits("300", 6));
 
